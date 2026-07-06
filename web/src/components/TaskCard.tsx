@@ -39,6 +39,31 @@ export function TaskCard({
       {task.claimed_by && (
         <div style={{ marginTop: 4, fontSize: 12, color: "#666" }}>claimed by {task.claimed_by}</div>
       )}
+      {task.branch && (
+        <div style={{ marginTop: 4, fontSize: 11, color: "#6366f1" }}>
+          ⎇ {task.branch}
+        </div>
+      )}
+      {task.pr_url && (
+        <div style={{ marginTop: 4, fontSize: 11 }}>
+          <span
+            style={{
+              padding: "1px 6px",
+              borderRadius: 4,
+              background:
+                task.pr_status === "merged" ? "#dcfce7"
+                : task.pr_status === "closed" ? "#fee2e2"
+                : "#dbeafe",
+              color:
+                task.pr_status === "merged" ? "#166534"
+                : task.pr_status === "closed" ? "#991b1b"
+                : "#1e40af",
+            }}
+          >
+            #{task.pr_url.split("/").pop()} · {task.pr_status ?? "open"}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

@@ -19,6 +19,9 @@ export interface Task {
   sort_order: number;
   branch: string | null;
   pr_url: string | null;
+  pr_status: string | null;
+  repo_path: string | null;
+  base_branch: string | null;
   created_at: string;
   updated_at: string;
 }

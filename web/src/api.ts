@@ -20,6 +20,8 @@ export const api = {
     description?: string;
     tags?: string[];
     status?: TaskStatus;
+    repo_path?: string;
+    base_branch?: string;
   }): Promise<Task> {
     return j(
       await fetch(`${BASE}/tasks`, {

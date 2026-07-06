@@ -71,7 +71,33 @@ Then instruct your agent: "Check the kanban board for tasks via get_next_task."
 
 Agents must pass their identifier as the `agent` argument to mutation tools
 (`claim_task`, `post_progress`, `complete_task`, `request_review`, `post_comment`,
-`post_artifact`). The board authorizes mutations by checking `claimed_by == agent`.
+`post_artifact`, `set_task_branch`, `set_task_pr`). The board authorizes mutations
+by checking `claimed_by == agent`.
+
+## Coding tasks (git/PR)
+
+For tasks that touch a git repo, set `repo_path` and `base_branch` when creating
+the task. The board does NOT create branches or PRs — your agent does that with
+its own git tools. The board records what the agent reports and renders a review
+diff.
+
+Agent workflow for a coding task:
+1. `claim_task` — receives `repo_path` and (if set) `base_branch`.
+2. Create a branch in `repo_path` with the agent's git tool.
+3. `set_task_branch(task_id, agent, branch)` — record it so the UI shows it and
+   the diff can be collected.
+4. Commit work on that branch.
+5. `request_review(task_id, agent, summary)` — the board runs
+   `git -C <repo_path> diff <base>...<branch>` once and stores the result as a
+   diff event visible in the card's progress feed.
+6. Open a PR with the agent's GitHub tool, then
+   `set_task_pr(task_id, agent, pr_url, "open")`.
+7. When merged, `set_task_pr(task_id, agent, pr_url, "merged")` then
+   `complete_task`.
+
+If `repo_path`, `base_branch` (or the project's `default_branch`), or `branch` is
+missing, diff collection is skipped silently. If `git diff` fails, an error event
+is recorded instead, but the review request itself still succeeds.
 
 ## Docker
 ```bash

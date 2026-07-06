@@ -1,13 +1,13 @@
-"""MCP server exposing 8 core tools for agents (Phase 1).
+"""MCP server exposing the core tools for agents.
 
 Uses FastMCP (bundled in the official `mcp` SDK since v1.2). The HTTP app
 returned by `mcp.streamable_http_app()` is mounted in server.py at /mcp.
 
 Two ways to obtain an instance:
-  - `create_mcp()` factory: builds a fresh FastMCP with all 8 tools registered.
-    Used by `server.create_app()` so each app gets its own session manager
-    (StreamableHTTPSessionManager is single-use per instance; reusing one across
-    multiple app lifespans raises RuntimeError).
+  - `create_mcp()` factory: builds a fresh FastMCP with all core tools
+    registered. Used by `server.create_app()` so each app gets its own session
+    manager (StreamableHTTPSessionManager is single-use per instance; reusing
+    one across multiple app lifespans raises RuntimeError).
   - `mcp` module-level singleton: a convenience instance for in-process tool
     invocation (e.g. `mcp.call_tool(name, args)`, used by tests). It does not
     serve HTTP and never has its session manager started.
@@ -41,6 +41,8 @@ from agent_kanban.services import (
     post_comment as svc_post_comment,
     post_progress as svc_post_progress,
     request_review as svc_request_review,
+    set_task_branch as svc_set_task_branch,
+    set_task_pr as svc_set_task_pr,
 )
 
 
@@ -71,11 +73,14 @@ def _task_to_dict(task) -> dict:
         "project_id": task.project_id,
         "branch": task.branch,
         "pr_url": task.pr_url,
+        "pr_status": task.pr_status,
+        "repo_path": task.repo_path,
+        "base_branch": task.base_branch,
     }
 
 
 def create_mcp() -> FastMCP:
-    """Build a FastMCP instance with all 8 core tools registered.
+    """Build a FastMCP instance with all core tools registered.
 
     Each call returns an independent instance with its own tool registry and
     (lazily-created, single-use) session manager. Callers that serve HTTP
@@ -238,6 +243,29 @@ def create_mcp() -> FastMCP:
                 ),
             )
             return {"id": art.id, "path": art.path, "kind": art.kind}
+
+    @mcp.tool()
+    async def set_task_branch(task_id: int, agent: str, branch: str) -> dict:
+        """Report the working branch the agent created for this task.
+
+        Stores branch on the task so the UI can show it and request_review can
+        collect a diff against the base branch. Requires task.claimed_by == agent.
+        """
+        async with session() as s:
+            task = await svc_set_task_branch(s, task_id, agent, branch)
+            return _task_to_dict(task)
+
+    @mcp.tool()
+    async def set_task_pr(
+        task_id: int, agent: str, pr_url: str, status: str
+    ) -> dict:
+        """Report a pull request URL and its status for this task.
+
+        status: "open" | "merged" | "closed". Requires task.claimed_by == agent.
+        """
+        async with session() as s:
+            task = await svc_set_task_pr(s, task_id, agent, pr_url, status)
+            return _task_to_dict(task)
 
     return mcp
 
