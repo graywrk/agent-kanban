@@ -175,3 +175,38 @@ async def test_cannot_delete_last_admin(client):
     # Deleting ourselves (the only admin) is rejected by both guards.
     r = await client.delete(f"/api/users/{my_id}")
     assert r.status_code == 400
+
+
+# --- WebSocket ticket endpoint ---
+@pytest.mark.asyncio
+async def test_ws_ticket_requires_auth(client):
+    r = await client.post("/api/ws-ticket")
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_ws_ticket_minted_for_authed_user(client):
+    from agent_kanban.db import AsyncSessionLocal
+    from agent_kanban.models import User
+    from agent_kanban.auth import hash_password
+
+    async with AsyncSessionLocal() as session:
+        session.add(User(username="alice", password_hash=hash_password("pw"), is_admin=True))
+        await session.commit()
+    await client.post("/api/login", json={"username": "alice", "password": "pw"})
+    r = await client.post("/api/ws-ticket")
+    assert r.status_code == 200
+    body = r.json()
+    assert "ticket" in body and len(body["ticket"]) >= 16
+    assert body["expires_in"] == 60
+
+
+@pytest.mark.asyncio
+async def test_ws_ticket_single_use(client):
+    """A ticket consumed by resolve_ticket cannot be reused."""
+    from agent_kanban.auth import Principal, mint_ticket, resolve_ticket
+
+    p = Principal(kind="user", agent_name="user", is_admin=True)
+    nonce = mint_ticket(p)
+    assert resolve_ticket(nonce) is not None
+    assert resolve_ticket(nonce) is None  # consumed

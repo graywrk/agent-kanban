@@ -1,5 +1,6 @@
 """Authentication: password hashing, token generation/verification, Principal resolution."""
 import secrets
+import time
 from datetime import UTC, datetime
 from typing import Literal, Optional
 
@@ -120,3 +121,39 @@ async def _get_request_session(request: Request):
     from agent_kanban.db import AsyncSessionLocal
     async with AsyncSessionLocal() as s:
         yield s
+
+
+# In-process WS ticket store. Keyed by nonce, value (Principal, expiry_ts).
+# Single-process Phase 5; Redis if we ever scale horizontally.
+_WS_TICKETS: dict[str, tuple[Principal, float]] = {}
+_WS_TICKET_TTL_S = 60.0
+
+
+def mint_ticket(principal: Principal) -> str:
+    """Issue a single-use WS ticket bound to the given principal. Valid 60s."""
+    nonce = secrets.token_urlsafe(16)
+    _WS_TICKETS[nonce] = (principal, time.monotonic() + _WS_TICKET_TTL_S)
+    return nonce
+
+
+def resolve_ticket(nonce: str) -> Optional[Principal]:
+    """Consume a WS ticket. Returns the Principal if valid+unexpired, else None.
+
+    Single-use: the nonce is removed regardless of outcome so a replay fails.
+    """
+    _gc_tickets()
+    entry = _WS_TICKETS.pop(nonce, None)
+    if entry is None:
+        return None
+    principal, expires_at = entry
+    if time.monotonic() > expires_at:
+        return None
+    return principal
+
+
+def _gc_tickets() -> None:
+    """Drop expired tickets so the dict doesn't grow unbounded."""
+    now = time.monotonic()
+    expired = [k for k, (_, exp) in _WS_TICKETS.items() if now > exp]
+    for k in expired:
+        _WS_TICKETS.pop(k, None)

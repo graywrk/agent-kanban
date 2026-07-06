@@ -59,6 +59,21 @@ async def me(principal: Principal = Depends(get_current_principal)):
     return principal
 
 
+# ---- WebSocket ticket (authed) ----
+@router.post("/ws-ticket")
+async def ws_ticket(principal: Principal = Depends(get_current_principal)):
+    """Mint a single-use ticket for WebSocket authentication.
+
+    The WS cannot set Authorization headers (browser limitation), so for
+    cross-origin WS the frontend posts this endpoint (cookie/bearer authed)
+    and connects the socket with ?ticket=<nonce>. The nonce is single-use
+    and expires in 60s, so it never leaks the bearer into proxy logs.
+    """
+    from agent_kanban.auth import mint_ticket
+
+    return {"ticket": mint_ticket(principal), "expires_in": 60}
+
+
 # ---- Tokens (admin) ----
 class TokenCreate(BaseModel):
     agent_name: str
