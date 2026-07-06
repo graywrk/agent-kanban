@@ -116,6 +116,31 @@ async def test_claim_task_via_mcp(session: AsyncSession):
 
 
 @pytest.mark.asyncio
+async def test_claim_task_returns_repo_path_and_base_branch(session: AsyncSession):
+    """Spec §6.2: agent receives repo_path and base_branch on claim."""
+    t = await create_task(
+        session,
+        TaskCreate(
+            title="coding task",
+            status=TaskStatus.READY,
+            repo_path="/path/to/repo",
+            base_branch="main",
+        ),
+    )
+    result = await mcp.call_tool("claim_task", {"task_id": t.id, "agent": "codex"})
+    data = _to_dict(result)
+    # claim_task returns {ok, reason, task}; the task dict may sit at top level
+    # or be nested under "result" depending on SDK wrapping for the pinned version.
+    task_dict = (
+        data.get("task", data) if isinstance(data, dict) else data
+    )
+    if not isinstance(task_dict, dict) or "repo_path" not in task_dict:
+        task_dict = data.get("result", {}).get("task", task_dict)
+    assert task_dict.get("repo_path") == "/path/to/repo"
+    assert task_dict.get("base_branch") == "main"
+
+
+@pytest.mark.asyncio
 async def test_claim_task_rejects_when_not_ready(session: AsyncSession):
     t = await create_task(session, TaskCreate(title="x", status=TaskStatus.TODO))
     result = await mcp.call_tool("claim_task", {"task_id": t.id, "agent": "codex"})
@@ -227,8 +252,8 @@ async def test_post_artifact_rejects_wrong_agent(session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_tools_list_eight_tools_registered():
-    """Sanity: all 9 core tools + 2 Phase 3 tools are registered with FastMCP."""
+async def test_tools_list_core_tools_registered():
+    """Sanity: all core MCP tools (11) are registered with FastMCP."""
     tools = await mcp.list_tools()
     names = {t.name for t in tools}
     expected = {

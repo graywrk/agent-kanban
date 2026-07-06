@@ -1,13 +1,13 @@
-"""MCP server exposing 8 core tools for agents (Phase 1).
+"""MCP server exposing the core tools for agents.
 
 Uses FastMCP (bundled in the official `mcp` SDK since v1.2). The HTTP app
 returned by `mcp.streamable_http_app()` is mounted in server.py at /mcp.
 
 Two ways to obtain an instance:
-  - `create_mcp()` factory: builds a fresh FastMCP with all 8 tools registered.
-    Used by `server.create_app()` so each app gets its own session manager
-    (StreamableHTTPSessionManager is single-use per instance; reusing one across
-    multiple app lifespans raises RuntimeError).
+  - `create_mcp()` factory: builds a fresh FastMCP with all core tools
+    registered. Used by `server.create_app()` so each app gets its own session
+    manager (StreamableHTTPSessionManager is single-use per instance; reusing
+    one across multiple app lifespans raises RuntimeError).
   - `mcp` module-level singleton: a convenience instance for in-process tool
     invocation (e.g. `mcp.call_tool(name, args)`, used by tests). It does not
     serve HTTP and never has its session manager started.
@@ -74,11 +74,13 @@ def _task_to_dict(task) -> dict:
         "branch": task.branch,
         "pr_url": task.pr_url,
         "pr_status": task.pr_status,
+        "repo_path": task.repo_path,
+        "base_branch": task.base_branch,
     }
 
 
 def create_mcp() -> FastMCP:
-    """Build a FastMCP instance with all 8 core tools registered.
+    """Build a FastMCP instance with all core tools registered.
 
     Each call returns an independent instance with its own tool registry and
     (lazily-created, single-use) session manager. Callers that serve HTTP
