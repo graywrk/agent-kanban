@@ -31,7 +31,18 @@ export function CardDetail({ taskId, onBack }: { taskId: number; onBack: () => v
       <div style={{ color: "#666", marginBottom: 12 }}>
         status: <strong>{task.status}</strong>
         {task.claimed_by && <> · claimed by {task.claimed_by}</>}
-        {task.branch && <> · branch: {task.branch}</>}
+        {task.branch && <> · ⎇ <code>{task.branch}</code></>}
+        {task.pr_url && (
+          <>
+            {" · "}PR{" "}
+            <a href={task.pr_url} target="_blank" rel="noreferrer">
+              #{task.pr_url.split("/").pop()}
+            </a>{" "}
+            <em style={{ color: task.pr_status === "merged" ? "#166534" : "#666" }}>
+              ({task.pr_status ?? "open"})
+            </em>
+          </>
+        )}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16 }}>
         <div>

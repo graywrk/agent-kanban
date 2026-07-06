@@ -6,12 +6,16 @@ export function NewTaskModal({ onClose, onCreated }: { onClose: () => void; onCr
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [tags, setTags] = useState("");
+  const [repoPath, setRepoPath] = useState("");
+  const [baseBranch, setBaseBranch] = useState("");
 
   async function submit() {
     const t = await api.createTask({
       title,
       description,
       tags: tags.split(",").map((s) => s.trim()).filter(Boolean),
+      ...(repoPath ? { repo_path: repoPath } : {}),
+      ...(baseBranch ? { base_branch: baseBranch } : {}),
     });
     onCreated(t);
     onClose();
@@ -23,7 +27,19 @@ export function NewTaskModal({ onClose, onCreated }: { onClose: () => void; onCr
         <h3>New task</h3>
         <input placeholder="Title" value={title} onChange={(e) => setTitle(e.target.value)} style={{ width: "100%", marginBottom: 8 }} />
         <textarea placeholder="Description (markdown)" value={description} onChange={(e) => setDescription(e.target.value)} rows={5} style={{ width: "100%", marginBottom: 8 }} />
-        <input placeholder="Tags (comma-separated)" value={tags} onChange={(e) => setTags(e.target.value)} style={{ width: "100%", marginBottom: 12 }} />
+        <input placeholder="Tags (comma-separated)" value={tags} onChange={(e) => setTags(e.target.value)} style={{ width: "100%", marginBottom: 8 }} />
+        <input
+          placeholder="Repo path (optional, for coding tasks)"
+          value={repoPath}
+          onChange={(e) => setRepoPath(e.target.value)}
+          style={{ width: "100%", marginBottom: 8 }}
+        />
+        <input
+          placeholder="Base branch (optional, e.g. main)"
+          value={baseBranch}
+          onChange={(e) => setBaseBranch(e.target.value)}
+          style={{ width: "100%", marginBottom: 12 }}
+        />
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button onClick={onClose}>Cancel</button>
           <button onClick={submit} disabled={!title}>Create</button>
