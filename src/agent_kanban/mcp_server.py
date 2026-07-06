@@ -70,12 +70,16 @@ def _task_to_dict(task) -> dict:
         "status": task.status.value if hasattr(task.status, "value") else task.status,
         "tags": task.tags,
         "claimed_by": task.claimed_by,
+        "claimed_at": task.claimed_at.isoformat() + "Z" if task.claimed_at else None,
         "project_id": task.project_id,
+        "sort_order": task.sort_order,
+        "repo_path": task.repo_path,
+        "base_branch": task.base_branch,
         "branch": task.branch,
         "pr_url": task.pr_url,
         "pr_status": task.pr_status,
-        "repo_path": task.repo_path,
-        "base_branch": task.base_branch,
+        "created_at": task.created_at.isoformat() + "Z",
+        "updated_at": task.updated_at.isoformat() + "Z",
     }
 
 

@@ -11,7 +11,6 @@ from agent_kanban.services import (
     post_artifact,
     post_progress,
     request_review,
-    update_task,
 )
 from agent_kanban.models import ProgressKind
 
@@ -25,7 +24,7 @@ async def test_create_task_defaults_to_todo(session: AsyncSession):
 
 @pytest.mark.asyncio
 async def test_get_next_task_returns_only_ready(session: AsyncSession):
-    a = await create_task(session, TaskCreate(title="a", status=TaskStatus.TODO))
+    await create_task(session, TaskCreate(title="a", status=TaskStatus.TODO))
     b = await create_task(session, TaskCreate(title="b", status=TaskStatus.READY))
     nxt = await get_next_task(session, None, None, None)
     assert nxt is not None
