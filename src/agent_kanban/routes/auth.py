@@ -32,6 +32,34 @@ async def setup_status(session: AsyncSession = Depends(get_session)):
     return {"needs_setup": count == 0}
 
 
+# ---- First-run setup (public) ----
+class SetupBody(BaseModel):
+    username: str
+    password: str
+
+
+@router.post("/setup", status_code=201)
+async def setup(body: SetupBody, session: AsyncSession = Depends(get_session)):
+    """Create the first admin user. Only valid when no users exist (needs_setup)."""
+    if not body.username.strip():
+        raise HTTPException(400, "username must not be empty")
+    if len(body.password) < 8:
+        raise HTTPException(400, "password must be at least 8 characters")
+    # Serialize setup: an advisory lock prevents two concurrent setups from both
+    # observing count==0 and both inserting. The lock key is arbitrary but stable.
+    # 7331001 is a port-derived constant; it has no meaning beyond being stable.
+    from sqlalchemy import text
+    await session.execute(text("SELECT pg_advisory_xact_lock(7331001)"))
+    existing = (await session.execute(select(func.count(User.id)))).scalar_one()
+    if existing > 0:
+        raise HTTPException(409, "setup already complete — users exist")
+    u = User(username=body.username.strip(), password_hash=hash_password(body.password), is_admin=True)
+    session.add(u)
+    await session.commit()
+    await session.refresh(u)
+    return {"id": u.id, "username": u.username, "is_admin": u.is_admin}
+
+
 # ---- Login / logout (public) ----
 class LoginBody(BaseModel):
     username: str
@@ -57,6 +85,21 @@ async def logout(request: Request):
 @router.get("/me")
 async def me(principal: Principal = Depends(get_current_principal)):
     return principal
+
+
+# ---- WebSocket ticket (authed) ----
+@router.post("/ws-ticket")
+async def ws_ticket(principal: Principal = Depends(get_current_principal)):
+    """Mint a single-use ticket for WebSocket authentication.
+
+    The WS cannot set Authorization headers (browser limitation), so for
+    cross-origin WS the frontend posts this endpoint (cookie/bearer authed)
+    and connects the socket with ?ticket=<nonce>. The nonce is single-use
+    and expires in 60s, so it never leaks the bearer into proxy logs.
+    """
+    from agent_kanban.auth import mint_ticket
+
+    return {"ticket": mint_ticket(principal), "expires_in": 60}
 
 
 # ---- Tokens (admin) ----
@@ -95,6 +138,7 @@ async def create_token(
     tok = Token(
         agent_name=body.agent_name,
         token_hash=hash_token(plain),
+        token_prefix=plain[:8],
         description=body.description,
         created_by_user_id=principal.user_id,
     )
@@ -189,3 +233,48 @@ async def delete_user(
     await session.delete(target)
     await session.commit()
     return {"ok": True}
+
+
+# ---- Edit user: password change + admin toggle (admin) ----
+class UserPatch(BaseModel):
+    current_password: Optional[str] = None
+    password: Optional[str] = None
+    is_admin: Optional[bool] = None
+
+
+@router.patch("/users/{user_id}")
+async def patch_user(
+    user_id: int,
+    body: UserPatch,
+    principal: Principal = Depends(get_current_principal),
+    session: AsyncSession = Depends(get_session),
+):
+    _require_admin(principal)
+    target = await session.get(User, user_id)
+    if target is None:
+        raise HTTPException(404, "user not found")
+
+    if body.password is not None:
+        # Password change requires the acting admin's current password.
+        if not body.current_password:
+            raise HTTPException(400, "current_password required to change password")
+        acting = await session.get(User, principal.user_id)
+        if acting is None or not verify_password(body.current_password, acting.password_hash):
+            raise HTTPException(403, "current_password incorrect")
+        if len(body.password) < 8:
+            raise HTTPException(400, "password must be at least 8 characters")
+        target.password_hash = hash_password(body.password)
+
+    if body.is_admin is not None:
+        # Demoting the last admin is forbidden.
+        if body.is_admin is False and target.is_admin is True:
+            admin_count = (
+                await session.execute(select(func.count(User.id)).where(User.is_admin == True))  # noqa: E712
+            ).scalar_one()
+            if admin_count <= 1:
+                raise HTTPException(400, "cannot demote the last admin")
+        target.is_admin = body.is_admin
+
+    await session.commit()
+    await session.refresh(target)
+    return {"id": target.id, "username": target.username, "is_admin": target.is_admin}

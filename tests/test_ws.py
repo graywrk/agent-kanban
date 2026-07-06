@@ -96,3 +96,37 @@ async def test_ws_task_channel_filtered(db_url):
             msg = ws.receive_json()
             assert msg["type"] == "comment"
             assert msg["author"] == "user"
+
+
+@pytest.mark.asyncio
+async def test_ws_accepts_ticket(db_url):
+    """A single-use ticket from POST /api/ws-ticket authenticates the WS."""
+    from agent_kanban.config import get_settings
+    get_settings.cache_clear()
+    app = create_app()
+
+    with TestClient(app) as client:
+        await _login_admin(client)
+        # Mint a ticket via the authed REST endpoint.
+        ticket = client.post("/api/ws-ticket").json()["ticket"]
+        # Connecting with ?ticket= should be accepted and stream events.
+        with client.websocket_connect(f"/ws?ticket={ticket}") as ws:
+            r = client.post("/api/tasks", json={"title": "x"})
+            assert r.status_code == 201
+            msg = ws.receive_json()
+            assert msg["type"] == "task_created"
+            assert msg["task_id"] == r.json()["id"]
+
+
+@pytest.mark.asyncio
+async def test_ws_rejects_invalid_ticket(db_url):
+    """A bogus ticket is rejected with code 1008."""
+    from agent_kanban.config import get_settings
+    get_settings.cache_clear()
+    app = create_app()
+
+    with TestClient(app) as client:
+        with pytest.raises(WebSocketDisconnect) as exc:
+            with client.websocket_connect("/ws?ticket=not-a-real-ticket"):
+                pass
+        assert exc.value.code == 1008

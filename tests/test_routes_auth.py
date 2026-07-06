@@ -175,3 +175,118 @@ async def test_cannot_delete_last_admin(client):
     # Deleting ourselves (the only admin) is rejected by both guards.
     r = await client.delete(f"/api/users/{my_id}")
     assert r.status_code == 400
+
+
+# --- WebSocket ticket endpoint ---
+@pytest.mark.asyncio
+async def test_ws_ticket_requires_auth(client):
+    r = await client.post("/api/ws-ticket")
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_ws_ticket_minted_for_authed_user(client):
+    from agent_kanban.db import AsyncSessionLocal
+    from agent_kanban.models import User
+    from agent_kanban.auth import hash_password
+
+    async with AsyncSessionLocal() as session:
+        session.add(User(username="alice", password_hash=hash_password("pw"), is_admin=True))
+        await session.commit()
+    await client.post("/api/login", json={"username": "alice", "password": "pw"})
+    r = await client.post("/api/ws-ticket")
+    assert r.status_code == 200
+    body = r.json()
+    assert "ticket" in body and len(body["ticket"]) >= 16
+    assert body["expires_in"] == 60
+
+
+@pytest.mark.asyncio
+async def test_ws_ticket_single_use(client):
+    """A ticket consumed by resolve_ticket cannot be reused."""
+    from agent_kanban.auth import Principal, mint_ticket, resolve_ticket
+
+    p = Principal(kind="user", agent_name="user", is_admin=True)
+    nonce = mint_ticket(p)
+    assert resolve_ticket(nonce) is not None
+    assert resolve_ticket(nonce) is None  # consumed
+
+
+# --- /api/setup + PATCH /api/users (Phase 5) ---
+@pytest.mark.asyncio
+async def test_setup_creates_first_admin(client):
+    r = await client.post("/api/setup", json={"username": "root", "password": "hunter22"})
+    assert r.status_code == 201
+    # Now login works with those creds.
+    r = await client.post("/api/login", json={"username": "root", "password": "hunter22"})
+    assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_setup_rejected_after_users_exist(client):
+    from agent_kanban.db import AsyncSessionLocal
+    from agent_kanban.models import User
+    from agent_kanban.auth import hash_password
+
+    async with AsyncSessionLocal() as session:
+        session.add(User(username="someone", password_hash=hash_password("pw"), is_admin=True))
+        await session.commit()
+    r = await client.post("/api/setup", json={"username": "root", "password": "hunter22"})
+    assert r.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_setup_rejects_empty_username(client):
+    r = await client.post("/api/setup", json={"username": "  ", "password": "longenough"})
+    assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_patch_user_changes_password(client):
+    from agent_kanban.db import AsyncSessionLocal
+    from agent_kanban.models import User
+    from agent_kanban.auth import hash_password
+
+    async with AsyncSessionLocal() as session:
+        session.add(User(username="alice", password_hash=hash_password("old"), is_admin=True))
+        await session.commit()
+    await client.post("/api/login", json={"username": "alice", "password": "old"})
+    r = await client.patch("/api/users/1", json={"current_password": "old", "password": "newpassword"})
+    assert r.status_code == 200
+    # New password works.
+    r = await client.post("/api/login", json={"username": "alice", "password": "newpassword"})
+    assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_patch_user_rejects_wrong_current_password(client):
+    from agent_kanban.db import AsyncSessionLocal
+    from agent_kanban.models import User
+    from agent_kanban.auth import hash_password
+
+    async with AsyncSessionLocal() as session:
+        session.add(User(username="alice", password_hash=hash_password("old"), is_admin=True))
+        await session.commit()
+    await client.post("/api/login", json={"username": "alice", "password": "old"})
+    r = await client.patch("/api/users/1", json={"current_password": "wrong", "password": "newpassword"})
+    assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_patch_user_toggle_admin(client):
+    from agent_kanban.db import AsyncSessionLocal
+    from agent_kanban.models import User
+    from agent_kanban.auth import hash_password
+
+    async with AsyncSessionLocal() as session:
+        admin = User(username="admin", password_hash=hash_password("pw"), is_admin=True)
+        pleb = User(username="pleb", password_hash=hash_password("pw"), is_admin=False)
+        session.add(admin)
+        session.add(pleb)
+        await session.commit()
+        await session.refresh(pleb)
+        pleb_id = pleb.id
+    await client.post("/api/login", json={"username": "admin", "password": "pw"})
+    r = await client.patch(f"/api/users/{pleb_id}", json={"is_admin": True})
+    assert r.status_code == 200
+    assert r.json()["is_admin"] is True

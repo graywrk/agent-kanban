@@ -1,7 +1,6 @@
 """FastAPI app factory."""
 import contextlib
 import os
-import secrets as _secrets
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,14 +13,14 @@ from agent_kanban.routes import artifacts, auth as auth_routes, comments, progre
 
 
 async def _bootstrap_admin() -> None:
-    """Create an admin user on first run (empty users table), once.
+    """Create an admin from BOOTSTRAP_ADMIN_PASSWORD if set and no users exist.
 
-    Idempotent: if any user already exists this is a no-op. The password comes
-    from ``settings.bootstrap_admin_password`` (env
-    ``AGENT_KANBAN_BOOTSTRAP_ADMIN_PASSWORD``) when set; otherwise a strong
-    random value is generated and printed once to stdout so the operator can
-    capture it. Must run BEFORE the MCP session manager starts so the admin
-    exists before any authenticated request can arrive.
+    If the env var is unset, first-run uses POST /api/setup from the UI instead
+    (the auto-generate-and-print path is removed so the operator sets the
+    password in-app). Existing automation that sets
+    ``AGENT_KANBAN_BOOTSTRAP_ADMIN_PASSWORD`` still works unchanged. Must run
+    BEFORE the MCP session manager starts so the admin exists before any
+    authenticated request can arrive.
     """
     from sqlmodel import select
 
@@ -30,25 +29,20 @@ async def _bootstrap_admin() -> None:
     from agent_kanban.models import User
 
     settings = get_settings()
+    if not settings.bootstrap_admin_password:
+        return  # UI /api/setup flow handles first-run
     async with AsyncSessionLocal() as session:
         existing = (await session.execute(select(User))).scalars().all()
         if existing:
             return
-        pw = settings.bootstrap_admin_password or _secrets.token_urlsafe(12)
         session.add(
             User(
                 username=settings.bootstrap_admin_username,
-                password_hash=hash_password(pw),
+                password_hash=hash_password(settings.bootstrap_admin_password),
                 is_admin=True,
             )
         )
         await session.commit()
-        # Print once so the operator can grab it.
-        print(
-            f"\n[agent-kanban] Bootstrapped admin user "
-            f"'{settings.bootstrap_admin_username}' with password: {pw}\n",
-            flush=True,
-        )
 
 
 def create_app() -> FastAPI:
@@ -92,6 +86,7 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
+        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )

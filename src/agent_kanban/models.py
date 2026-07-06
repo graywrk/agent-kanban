@@ -110,6 +110,7 @@ class Token(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     agent_name: str = Field(index=True)
     token_hash: str  # bcrypt hash of the opaque token
+    token_prefix: str = Field(default="", index=True)  # first 8 chars of plaintext, for fast lookup
     description: Optional[str] = None
     created_by_user_id: int = Field(foreign_key="user.id")
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC).replace(tzinfo=None))

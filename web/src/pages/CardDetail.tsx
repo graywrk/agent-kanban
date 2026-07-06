@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, subscribeWebSocket } from "../api";
+import type { WSSubscription } from "../api";
 import type { Comment, ProgressEvent, Task } from "../types";
 import { ProgressFeed } from "../components/ProgressFeed";
 import { CommentList } from "../components/CommentList";
@@ -17,9 +18,20 @@ export function CardDetail({ taskId, onBack }: { taskId: number; onBack: () => v
   }
 
   useEffect(() => {
+    let sub: WSSubscription | null = null;
+    let cancelled = false;
     refresh();
-    const ws = subscribeWebSocket(taskId, () => refresh());
-    return () => ws.close();
+    subscribeWebSocket(taskId, () => refresh()).then((s) => {
+      if (cancelled) {
+        s.close();
+      } else {
+        sub = s;
+      }
+    });
+    return () => {
+      cancelled = true;
+      sub?.close();
+    };
   }, [taskId]);
 
   if (!task) return <div>Loading…</div>;

@@ -1,5 +1,6 @@
 """Authentication: password hashing, token generation/verification, Principal resolution."""
 import secrets
+import time
 from datetime import UTC, datetime
 from typing import Literal, Optional
 
@@ -55,13 +56,22 @@ class Principal(BaseModel):
 async def _resolve_bearer(session: AsyncSession, header_value: str) -> Optional[Principal]:
     """Look up a Token row whose hash matches the bearer value.
 
-    Tokens are hashed with bcrypt; we don't know the salt ahead of time, so we
-    scan candidate rows. For a small N of tokens (typical: <50) this is fine.
-    If N grows, add a token_prefix column (first 8 chars) and index it, then
-    filter on the prefix before the bcrypt loop.
+    Filters by the first-8-char prefix (indexed) before bcrypt-verifying, so
+    the typical cost is one index lookup + one bcrypt check instead of N.
+    Falls back to a full scan if the prefix column is empty (legacy rows
+    whose plaintext was lost), so existing tokens keep working.
     """
-    result = await session.execute(select(Token))
-    for row in result.scalars():
+    prefix = header_value[:8]
+    # Try the prefix-filtered path first.
+    stmt = select(Token).where(Token.token_prefix == prefix)
+    result = await session.execute(stmt)
+    candidates = list(result.scalars())
+    if not candidates:
+        # Fallback: legacy rows with empty prefix.
+        legacy_stmt = select(Token).where(Token.token_prefix == "")
+        legacy_result = await session.execute(legacy_stmt)
+        candidates = list(legacy_result.scalars())
+    for row in candidates:
         if verify_token(header_value, row.token_hash):
             row.last_used_at = datetime.now(UTC).replace(tzinfo=None)
             await session.commit()
@@ -111,3 +121,39 @@ async def _get_request_session(request: Request):
     from agent_kanban.db import AsyncSessionLocal
     async with AsyncSessionLocal() as s:
         yield s
+
+
+# In-process WS ticket store. Keyed by nonce, value (Principal, expiry_ts).
+# Single-process Phase 5; Redis if we ever scale horizontally.
+_WS_TICKETS: dict[str, tuple[Principal, float]] = {}
+_WS_TICKET_TTL_S = 60.0
+
+
+def mint_ticket(principal: Principal) -> str:
+    """Issue a single-use WS ticket bound to the given principal. Valid 60s."""
+    nonce = secrets.token_urlsafe(16)
+    _WS_TICKETS[nonce] = (principal, time.monotonic() + _WS_TICKET_TTL_S)
+    return nonce
+
+
+def resolve_ticket(nonce: str) -> Optional[Principal]:
+    """Consume a WS ticket. Returns the Principal if valid+unexpired, else None.
+
+    Single-use: the nonce is removed regardless of outcome so a replay fails.
+    """
+    _gc_tickets()
+    entry = _WS_TICKETS.pop(nonce, None)
+    if entry is None:
+        return None
+    principal, expires_at = entry
+    if time.monotonic() > expires_at:
+        return None
+    return principal
+
+
+def _gc_tickets() -> None:
+    """Drop expired tickets so the dict doesn't grow unbounded."""
+    now = time.monotonic()
+    expired = [k for k, (_, exp) in _WS_TICKETS.items() if now > exp]
+    for k in expired:
+        _WS_TICKETS.pop(k, None)

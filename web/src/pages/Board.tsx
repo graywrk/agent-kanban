@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, subscribeWebSocket } from "../api";
+import type { WSSubscription } from "../api";
 import type { Task, TaskStatus } from "../types";
 import { Column } from "../components/Column";
 import { NewTaskModal } from "../components/NewTaskModal";
@@ -19,9 +20,20 @@ export function Board({ onOpenTask }: { onOpenTask: (id: number) => void }) {
   }
 
   useEffect(() => {
+    let sub: WSSubscription | null = null;
+    let cancelled = false;
     refresh();
-    const ws = subscribeWebSocket(null, () => refresh());
-    return () => ws.close();
+    subscribeWebSocket(null, () => refresh()).then((s) => {
+      if (cancelled) {
+        s.close();
+      } else {
+        sub = s;
+      }
+    });
+    return () => {
+      cancelled = true;
+      sub?.close();
+    };
   }, []);
 
   useEffect(() => {
