@@ -1,5 +1,5 @@
 """SQLModel ORM models matching spec §4.1."""
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Optional
 
@@ -30,7 +30,7 @@ class Project(SQLModel, table=True):
     name: str
     repo_path: Optional[str] = None
     default_branch: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC).replace(tzinfo=None))
 
 
 class Task(SQLModel, table=True):
@@ -59,8 +59,8 @@ class Task(SQLModel, table=True):
     branch: Optional[str] = None
     pr_url: Optional[str] = None
     pr_status: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC).replace(tzinfo=None))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC).replace(tzinfo=None))
 
 
 class ProgressEvent(SQLModel, table=True):
@@ -77,7 +77,7 @@ class ProgressEvent(SQLModel, table=True):
         )
     )
     payload: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC).replace(tzinfo=None), index=True)
 
 
 class Comment(SQLModel, table=True):
@@ -86,7 +86,7 @@ class Comment(SQLModel, table=True):
     author: str
     content: str
     seen_by_agent: bool = False
-    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC).replace(tzinfo=None), index=True)
 
 
 class Artifact(SQLModel, table=True):
@@ -95,4 +95,4 @@ class Artifact(SQLModel, table=True):
     path: str
     kind: str
     description: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC).replace(tzinfo=None))
