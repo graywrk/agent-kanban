@@ -1,6 +1,7 @@
 """Application settings loaded from environment."""
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,6 +15,12 @@ class Settings(BaseSettings):
     session_secret: str = "dev-insecure-secret-change-me"  # override via env in prod
     public_url: str = "http://localhost:7331"
     bootstrap_admin_username: str = "admin"
+    # Read from BOOTSTRAP_ADMIN_PASSWORD (pydantic default) OR the explicit
+    # AGENT_KANBAN_BOOTSTRAP_ADMIN_PASSWORD alias (preferred public name).
+    bootstrap_admin_password: str = Field(
+        default="",
+        validation_alias="AGENT_KANBAN_BOOTSTRAP_ADMIN_PASSWORD",
+    )
 
 
 @lru_cache

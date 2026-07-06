@@ -14,6 +14,10 @@ async def _login_admin(client):
     Seed via raw asyncpg (not SQLAlchemy's AsyncSessionLocal) so we don't bind a
     pooled connection to this test loop — TestClient runs the app on its own
     event loop, and a cross-loop pooled connection crashes asyncpg.
+
+    Uses ON CONFLICT (upsert) because the app lifespan now bootstraps an admin
+    user on first run (empty users table); this resets its password to a known
+    value so the subsequent login succeeds regardless of whether bootstrap ran.
     """
     from agent_kanban.auth import hash_password
     from datetime import UTC, datetime
@@ -22,7 +26,8 @@ async def _login_admin(client):
     try:
         await conn.execute(
             'INSERT INTO "user" (username, password_hash, is_admin, created_at) '
-            "VALUES ($1, $2, $3, $4)",
+            "VALUES ($1, $2, $3, $4) "
+            'ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash',
             "admin",
             hash_password("pw"),
             True,

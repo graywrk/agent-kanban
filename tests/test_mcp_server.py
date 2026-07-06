@@ -26,10 +26,19 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agent_kanban.config import get_settings
+from agent_kanban import mcp_server
 from agent_kanban.mcp_server import mcp
 from agent_kanban.models import TaskStatus
 from agent_kanban.schemas import TaskCreate
 from agent_kanban.services import create_task, get_task
+
+# Bind the REAL verifier implementations at import time, before the autouse
+# `_stub_mcp_principal` fixture (conftest.py) monkeypatches the module-level
+# names. The enforcement regression tests below invoke these bound references
+# to exercise the genuine logic rather than the stubs.
+_real_require_matching_agent = mcp_server._require_matching_agent
+_real_require_any_principal = mcp_server._require_any_principal
+_real_mcp_principal = mcp_server._mcp_principal
 
 
 def _to_dict(result):
@@ -84,6 +93,11 @@ def _bind_mcp_to_test_db(db_url):
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
+
+
+# The MCP principal verifiers are stubbed for in-process `mcp.call_tool` by the
+# autouse `_stub_mcp_principal` fixture in tests/conftest.py (shared across all
+# test modules that invoke MCP tools directly).
 
 
 @pytest.mark.asyncio
@@ -317,3 +331,32 @@ async def test_set_task_pr_via_mcp(session: AsyncSession):
     )
     assert flat["pr_url"] == "https://github.com/x/y/pull/1"
     assert flat["pr_status"] == "open"
+
+
+# --- Enforcement regression tests -------------------------------------------
+# These intentionally bypass the autouse `_stub_mcp_principal` stub by invoking
+# the real verifier functions against the real `_mcp_principal` ContextVar.
+# They prove the agent-param-spoofing hole is actually closed: with no token
+# (empty ContextVar) every tool is rejected, and a mismatched agent is rejected
+# even when a principal is present.
+@pytest.mark.asyncio
+async def test_verifier_rejects_unauthenticated(session: AsyncSession):
+    assert _real_mcp_principal.get() is None  # no HTTP middleware in-process
+    with pytest.raises(PermissionError, match="authentication required"):
+        await _real_require_any_principal()
+
+
+@pytest.mark.asyncio
+async def test_matching_verifier_rejects_mismatched_agent(session: AsyncSession):
+    from agent_kanban.auth import Principal
+
+    token = _real_mcp_principal.set(Principal(kind="token", agent_name="codex"))
+    try:
+        # Correct agent passes.
+        p = await _real_require_matching_agent("codex")
+        assert p.agent_name == "codex"
+        # Spoofed agent is rejected — closes the param-spoofing hole.
+        with pytest.raises(PermissionError, match="does not match"):
+            await _real_require_matching_agent("hermes")
+    finally:
+        _real_mcp_principal.reset(token)
