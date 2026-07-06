@@ -25,6 +25,9 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://kanban:kanban@postgres:5432/kanban
       PORT: "7331"
+      SESSION_SECRET: ${SESSION_SECRET:-please-change-me-in-production}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:7331}
+      AGENT_KANBAN_BOOTSTRAP_ADMIN_PASSWORD: ${AGENT_KANBAN_BOOTSTRAP_ADMIN_PASSWORD:-}
     ports:
       - "7331:7331"
 

@@ -99,6 +99,46 @@ If `repo_path`, `base_branch` (or the project's `default_branch`), or `branch` i
 missing, diff collection is skipped silently. If `git diff` fails, an error event
 is recorded instead, but the review request itself still succeeds.
 
+## Authentication
+
+The board requires authentication. Two kinds of principals:
+
+- **Users** (humans): log in with username + password via the web UI. Sessions are signed cookies.
+- **Tokens** (agents): opaque bearer tokens, managed in the Admin panel. Each token is bound to an `agent_name`.
+
+### First run
+
+On first startup with an empty database, the board auto-creates an `admin` user and prints a random password to stdout once. Set `AGENT_KANBAN_BOOTSTRAP_ADMIN_PASSWORD` to choose it yourself. Log in, then go to Admin → Users to add more users, and Admin → Tokens to mint tokens for your agents.
+
+### Pointing an agent at the board
+
+Agents authenticate via a bearer token. In your agent's MCP config:
+
+**Codex** (`~/.codex/config.toml`):
+```toml
+[mcp_servers.kanban]
+url = "http://your-host:7331/mcp"
+# Codex reads headers from config in newer versions; otherwise set the auth via env.
+headers = { Authorization = "Bearer <your-token>" }
+```
+
+**Hermes** (`~/.hermes/config.yaml`):
+```yaml
+mcp_servers:
+  kanban:
+    url: http://your-host:7331/mcp
+    headers:
+      Authorization: Bearer <your-token>
+```
+
+The token's `agent_name` MUST match the `agent` argument you pass to MCP tools. A token minted with `agent_name=codex` can call `claim_task(agent="codex")` but NOT `claim_task(agent="hermes")`.
+
+### Production env vars
+
+- `SESSION_SECRET` — signing key for session cookies. REQUIRED in production; set a long random string.
+- `PUBLIC_URL` — the public base URL (e.g. `https://kanban.example.com`). Controls cookie `Secure` flag.
+- `AGENT_KANBAN_BOOTSTRAP_ADMIN_PASSWORD` — first-run admin password (optional; auto-generated if unset).
+
 ## Docker
 ```bash
 docker compose up -d
