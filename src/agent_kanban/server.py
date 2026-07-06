@@ -101,6 +101,9 @@ def create_app() -> FastAPI:
     # Principal from the bearer header into a ContextVar that the tool
     # verifiers read.
     app.mount("/mcp", MCPAuthMiddleware(mcp_http_app))
+    # Expose the FastMCP instance on the app so tests can drive its session
+    # manager without re-deriving it from the mounted sub-app's routes.
+    app.state.mcp = mcp_instance
 
     # Serve the built React frontend (if present) as a catch-all at "/".
     # Mounted LAST so it never shadows /api, /ws, or /mcp. In dev the Vite dev

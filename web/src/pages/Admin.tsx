@@ -11,6 +11,7 @@ export function Admin({ onBack }: { onBack: () => void }) {
   const [newTokenDesc, setNewTokenDesc] = useState("");
   const [mintedToken, setMintedToken] = useState<string | null>(null);
   const [newUser, setNewUser] = useState({ username: "", password: "", is_admin: false });
+  const [actionError, setActionError] = useState<string | null>(null);
 
   async function refresh() {
     setTokens(await api.listTokens());
@@ -20,30 +21,54 @@ export function Admin({ onBack }: { onBack: () => void }) {
 
   async function mint() {
     if (!newTokenAgent.trim()) return;
-    const t = await api.createToken(newTokenAgent, newTokenDesc || undefined);
-    setMintedToken(t.token);
-    setNewTokenAgent(""); setNewTokenDesc("");
-    refresh();
+    setActionError(null);
+    try {
+      const t = await api.createToken(newTokenAgent, newTokenDesc || undefined);
+      setMintedToken(t.token);
+      setNewTokenAgent(""); setNewTokenDesc("");
+      refresh();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "Failed to mint token");
+    }
   }
   async function revoke(id: number) {
-    await api.deleteToken(id);
-    refresh();
+    setActionError(null);
+    try {
+      await api.deleteToken(id);
+      refresh();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "Failed to revoke token");
+    }
   }
   async function addUser() {
     if (!newUser.username || !newUser.password) return;
-    await api.createUser(newUser.username, newUser.password, newUser.is_admin);
-    setNewUser({ username: "", password: "", is_admin: false });
-    refresh();
+    setActionError(null);
+    try {
+      await api.createUser(newUser.username, newUser.password, newUser.is_admin);
+      setNewUser({ username: "", password: "", is_admin: false });
+      refresh();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "Failed to add user");
+    }
   }
   async function removeUser(id: number) {
-    await api.deleteUser(id);
-    refresh();
+    setActionError(null);
+    try {
+      await api.deleteUser(id);
+      refresh();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "Failed to remove user");
+    }
   }
 
   return (
     <div style={{ padding: 16, maxWidth: 900, margin: "0 auto" }}>
       <button onClick={onBack}>← Back to board</button>
       <h2>Admin</h2>
+
+      {actionError && (
+        <div style={{ color: "#dc2626", fontSize: 12, marginBottom: 12 }}>{actionError}</div>
+      )}
 
       <h3>Tokens (agents)</h3>
       {mintedToken && (

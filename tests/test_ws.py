@@ -4,6 +4,7 @@ import os
 import asyncpg
 import pytest
 from starlette.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from agent_kanban.server import create_app
 
@@ -36,6 +37,20 @@ async def _login_admin(client):
     finally:
         await conn.close()
     client.post("/api/login", json={"username": "admin", "password": "pw"})
+
+
+@pytest.mark.asyncio
+async def test_ws_rejects_unauthenticated(db_url):
+    """An unauthenticated WebSocket (no session cookie, no bearer) is rejected with code 1008."""
+    from agent_kanban.config import get_settings
+    get_settings.cache_clear()
+    app = create_app()
+
+    with TestClient(app) as client:
+        with pytest.raises(WebSocketDisconnect) as exc:
+            with client.websocket_connect("/ws"):
+                pass
+        assert exc.value.code == 1008
 
 
 @pytest.mark.asyncio

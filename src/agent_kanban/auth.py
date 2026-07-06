@@ -1,5 +1,6 @@
 """Authentication: password hashing, token generation/verification, Principal resolution."""
 import secrets
+from datetime import UTC, datetime
 from typing import Literal, Optional
 
 import bcrypt
@@ -62,7 +63,8 @@ async def _resolve_bearer(session: AsyncSession, header_value: str) -> Optional[
     result = await session.execute(select(Token))
     for row in result.scalars():
         if verify_token(header_value, row.token_hash):
-            row.last_used_at = None  # set by the caller after commit if desired
+            row.last_used_at = datetime.now(UTC).replace(tzinfo=None)
+            await session.commit()
             return Principal(
                 kind="token",
                 agent_name=row.agent_name,

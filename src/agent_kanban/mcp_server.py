@@ -16,9 +16,7 @@ Session resolution: each tool resolves the engine from current settings on
 every call via `agent_kanban.db._engine_for(get_settings().database_url)` —
 the same dynamic pattern the REST routes use (see `db.get_session`). A test
 that overrides DATABASE_URL (and clears the settings cache) transparently
-routes MCP tool calls to the throwaway DB; we intentionally avoid the
-import-time-bound `AsyncSessionLocal`, which would stay pinned to the
-production URL.
+routes MCP tool calls to the throwaway DB.
 """
 import contextvars
 from contextlib import asynccontextmanager

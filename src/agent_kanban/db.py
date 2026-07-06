@@ -20,11 +20,6 @@ def _engine_for(url: str) -> AsyncEngine:
     return engine
 
 
-# Module-level engine kept for backward-compat with any importer. The FastAPI
-# dependency below resolves against current settings so overrides win.
-engine = _engine_for(get_settings().database_url)
-
-
 def AsyncSessionLocal() -> AsyncSession:  # noqa: N802 - keep call-site name
     """Return an AsyncSession bound to the *current* DATABASE_URL.
 
