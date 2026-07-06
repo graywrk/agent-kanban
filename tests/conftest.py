@@ -12,6 +12,7 @@ import uuid
 import asyncpg
 import pytest
 import pytest_asyncio
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 TEST_DB_TEMPLATE = "postgresql://kanban:kanban@localhost:5436/postgres"
 
@@ -62,3 +63,12 @@ async def db_url(test_db_name, monkeypatch):
     cfg.set_main_option("sqlalchemy.url", url.replace("+asyncpg", ""))
     command.upgrade(cfg, "head")
     yield url
+
+
+@pytest_asyncio.fixture
+async def session(db_url):
+    engine = create_async_engine(db_url)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as s:
+        yield s
+    await engine.dispose()
