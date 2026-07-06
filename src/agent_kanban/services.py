@@ -3,7 +3,7 @@
 Authorization rule (spec §5.3): mutations require task.claimed_by == calling agent.
 We raise PermissionError on violation so callers can map to HTTP 403 / MCP error.
 """
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Optional
 
@@ -79,7 +79,7 @@ async def update_task(session: AsyncSession, task_id: int, data: TaskUpdate) -> 
     changes = data.model_dump(exclude_unset=True)
     for k, v in changes.items():
         setattr(task, k, v)
-    task.updated_at = datetime.utcnow()
+    task.updated_at = datetime.now(UTC).replace(tzinfo=None)
     await session.commit()
     await session.refresh(task)
     await _publish_task_event("board", "task_updated", task)
@@ -140,8 +140,8 @@ async def claim_task(session: AsyncSession, task_id: int, agent: str) -> ClaimRe
         .values(
             status=TaskStatus.IN_PROGRESS,
             claimed_by=agent,
-            claimed_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            claimed_at=datetime.now(UTC).replace(tzinfo=None),
+            updated_at=datetime.now(UTC).replace(tzinfo=None),
         )
         .returning(Task.id)
     )
@@ -178,7 +178,7 @@ async def post_progress(
         payload["status"] = data.status
         if data.status.get("to") == "blocked":
             task.status = TaskStatus.BLOCKED
-            task.updated_at = datetime.utcnow()
+            task.updated_at = datetime.now(UTC).replace(tzinfo=None)
             blocked = True
     ev = ProgressEvent(
         task_id=task_id,
@@ -209,7 +209,7 @@ async def complete_task(
     task = await get_task(session, task_id)
     _check_claimer(task, agent)
     task.status = TaskStatus.DONE
-    task.updated_at = datetime.utcnow()
+    task.updated_at = datetime.now(UTC).replace(tzinfo=None)
     if summary:
         session.add(
             ProgressEvent(
@@ -231,7 +231,7 @@ async def request_review(
     task = await get_task(session, task_id)
     _check_claimer(task, agent)
     task.status = TaskStatus.REVIEW
-    task.updated_at = datetime.utcnow()
+    task.updated_at = datetime.now(UTC).replace(tzinfo=None)
     if summary:
         session.add(
             ProgressEvent(
@@ -283,6 +283,39 @@ async def post_comment(
         f"task:{task_id}",
         {"type": "comment", "comment_id": c.id, "author": author},
     )
+    return c
+
+
+async def post_comment_with_status(
+    session: AsyncSession,
+    task_id: int,
+    author: str,
+    content: str,
+    target_status: Optional[TaskStatus],
+) -> Comment:
+    """Post a comment and optionally transition the task status, atomically.
+
+    Both the comment insert and the status update commit together. If the
+    status update fails, the comment is not persisted either.
+    """
+    # Validate task exists.
+    task = await get_task(session, task_id)
+    # Insert comment (no commit yet).
+    c = Comment(task_id=task_id, author=author, content=content)
+    session.add(c)
+    # Apply status transition if any.
+    if target_status is not None:
+        task.status = target_status
+        task.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    # Single commit for both.
+    await session.commit()
+    await session.refresh(c)
+    await event_bus.publish(
+        f"task:{task_id}",
+        {"type": "comment", "comment_id": c.id, "author": author},
+    )
+    if target_status is not None:
+        await _publish_task_event("board", "task_updated", task)
     return c
 
 

@@ -8,16 +8,25 @@ const COLUMNS: TaskStatus[] = ["todo", "ready", "in_progress", "review", "done",
 
 export function Board({ onOpenTask }: { onOpenTask: (id: number) => void }) {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [lastProgress, setLastProgress] = useState<Record<number, string>>({});
   const [showNew, setShowNew] = useState(false);
+  const [, setTick] = useState(0);
 
   async function refresh() {
-    setTasks(await api.listTasks());
+    const [tasks, lp] = await Promise.all([api.listTasks(), api.listLastProgressTimestamps()]);
+    setTasks(tasks);
+    setLastProgress(lp);
   }
 
   useEffect(() => {
     refresh();
     const ws = subscribeWebSocket(null, () => refresh());
     return () => ws.close();
+  }, []);
+
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 5000);
+    return () => clearInterval(id);
   }, []);
 
   async function handleDrop(taskId: number, status: TaskStatus) {
@@ -42,6 +51,7 @@ export function Board({ onOpenTask }: { onOpenTask: (id: number) => void }) {
             key={status}
             status={status}
             tasks={tasks.filter((t) => t.status === status)}
+            lastProgress={lastProgress}
             onDrop={handleDrop}
             onOpen={onOpenTask}
           />

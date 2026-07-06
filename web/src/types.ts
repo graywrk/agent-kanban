@@ -39,6 +39,11 @@ export interface ProgressEvent {
   created_at: string;
 }
 
+export interface ArtifactMeta {
+  path: string;
+  kind: string; // "screenshot" | "log" | "diff.patch" | "file" | ...
+}
+
 export interface Comment {
   id: number;
   task_id: number;

@@ -44,12 +44,21 @@ export const api = {
   async listProgress(taskId: number): Promise<ProgressEvent[]> {
     return j(await fetch(`${BASE}/tasks/${taskId}/progress`));
   },
+  async listLastProgressTimestamps(): Promise<Record<number, string>> {
+    return j(await fetch(`${BASE}/progress/last`));
+  },
   async listComments(taskId: number): Promise<Comment[]> {
     return j(await fetch(`${BASE}/tasks/${taskId}/comments`));
   },
-  async postComment(taskId: number, content: string, author = "user"): Promise<Comment> {
+  async postComment(
+    taskId: number,
+    content: string,
+    author = "user",
+    status?: "in_progress" | "ready"
+  ): Promise<Comment> {
+    const q = status ? `?status=${status}` : "";
     return j(
-      await fetch(`${BASE}/tasks/${taskId}/comments`, {
+      await fetch(`${BASE}/tasks/${taskId}/comments${q}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ author, content }),
@@ -58,13 +67,65 @@ export const api = {
   },
 };
 
+export interface WSOptions {
+  maxRetries?: number;
+  baseDelayMs?: number;
+}
+
+export interface WSSubscription {
+  close: () => void;
+}
+
 export function subscribeWebSocket(
   taskId: number | null,
-  onMessage: (evt: { type: string; [k: string]: unknown }) => void
-): WebSocket {
+  onMessage: (evt: { type: string; [k: string]: unknown }) => void,
+  options: WSOptions = {}
+): WSSubscription {
+  const maxRetries = options.maxRetries ?? 5;
+  const baseDelayMs = options.baseDelayMs ?? 500;
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   const q = taskId ? `?task_id=${taskId}` : "";
-  const ws = new WebSocket(`${proto}//${location.host}/ws${q}`);
-  ws.onmessage = (e) => onMessage(JSON.parse(e.data));
-  return ws;
+  const url = `${proto}//${location.host}/ws${q}`;
+
+  let retryCount = 0;
+  let closedByCaller = false;
+  let ws: WebSocket | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function open() {
+    ws = new WebSocket(url);
+    ws.onopen = () => {
+      retryCount = 0;
+    };
+    ws.onmessage = (e) => {
+      try {
+        onMessage(JSON.parse(e.data));
+      } catch (err) {
+        console.error("kanban: bad WS message", err);
+      }
+    };
+    ws.onerror = (err) => {
+      console.error("kanban: WS error", err);
+    };
+    ws.onclose = () => {
+      if (closedByCaller) return;
+      if (retryCount >= maxRetries) {
+        console.error(`kanban: WS giving up after ${maxRetries} retries`);
+        return;
+      }
+      const delay = baseDelayMs * Math.pow(2, retryCount);
+      retryCount += 1;
+      reconnectTimer = setTimeout(open, delay);
+    };
+  }
+
+  open();
+
+  return {
+    close: () => {
+      closedByCaller = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (ws) ws.close();
+    },
+  };
 }

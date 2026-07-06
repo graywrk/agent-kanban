@@ -1,11 +1,17 @@
 import type { Task } from "../types";
 
-const STATUS_LIVE_WINDOW_MS = 30_000;
+const LIVE_WINDOW_MS = 30_000;
 
-export function TaskCard({ task, fresh }: { task: Task; fresh?: boolean }) {
-  const isFresh =
-    fresh ??
-    Date.now() - new Date(task.created_at).getTime() < STATUS_LIVE_WINDOW_MS;
+export function TaskCard({
+  task,
+  lastProgressAt,
+}: {
+  task: Task;
+  lastProgressAt?: string;
+}) {
+  const isLive = lastProgressAt
+    ? Date.now() - new Date(lastProgressAt).getTime() < LIVE_WINDOW_MS
+    : false;
   return (
     <div
       style={{
@@ -13,11 +19,13 @@ export function TaskCard({ task, fresh }: { task: Task; fresh?: boolean }) {
         borderRadius: 6,
         padding: 10,
         background: "#fff",
-        boxShadow: isFresh ? "0 0 0 2px #22c55e" : "none",
+        boxShadow: isLive ? "0 0 0 2px #22c55e" : "none",
+        transition: "box-shadow 200ms",
       }}
     >
       <div style={{ fontWeight: 600 }}>
         #{task.id} {task.title}
+        {isLive && <span style={{ marginLeft: 6, fontSize: 11, color: "#22c55e" }}>● live</span>}
       </div>
       {task.tags.length > 0 && (
         <div style={{ marginTop: 4, display: "flex", gap: 4, flexWrap: "wrap" }}>

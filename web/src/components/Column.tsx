@@ -5,6 +5,7 @@ import { TaskCard } from "./TaskCard";
 interface Props {
   status: TaskStatus;
   tasks: Task[];
+  lastProgress: Record<number, string>;
   onDrop: (taskId: number, status: TaskStatus) => void;
   onOpen: (taskId: number) => void;
 }
@@ -19,7 +20,7 @@ const LABELS: Record<TaskStatus, string> = {
   cancelled: "CANCELLED",
 };
 
-export function Column({ status, tasks, onDrop, onOpen }: Props) {
+export function Column({ status, tasks, lastProgress, onDrop, onOpen }: Props) {
   const [over, setOver] = useState(false);
   return (
     <div
@@ -56,7 +57,7 @@ export function Column({ status, tasks, onDrop, onOpen }: Props) {
           onClick={() => onOpen(t.id)}
           style={{ cursor: "pointer" }}
         >
-          <TaskCard task={t} />
+          <TaskCard task={t} lastProgressAt={lastProgress[t.id]} />
         </div>
       ))}
     </div>
