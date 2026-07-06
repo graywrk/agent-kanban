@@ -22,6 +22,27 @@ class Settings(BaseSettings):
         validation_alias="AGENT_KANBAN_BOOTSTRAP_ADMIN_PASSWORD",
     )
 
+    # Known-insecure placeholder values shipped in the repo. The startup guard in
+    # server._lifespan refuses to serve when one of these is in effect AND the
+    # board is publicly deployed (PUBLIC_URL is https), since itsdangerous signs
+    # the kanban_session cookie with this key — anyone reading the repo could
+    # otherwise forge an admin session.
+    _INSECURE_SECRETS = frozenset(
+        {
+            "",
+            "dev-insecure-secret-change-me",
+            "please-change-me-in-production",
+        }
+    )
+
+    def is_insecure_session_secret(self) -> bool:
+        """True if session_secret is a known public/empty placeholder.
+
+        The startup path (server._lifespan) checks this to refuse serving on a
+        public https deployment with a forgeable cookie key.
+        """
+        return self.session_secret in self._INSECURE_SECRETS
+
 
 @lru_cache
 def get_settings() -> Settings:

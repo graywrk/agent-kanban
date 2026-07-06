@@ -293,11 +293,18 @@ def create_mcp() -> FastMCP:
         """List comments for a task since a given comment id.
 
         If agent is provided, marks the returned comments as seen by that agent
-        (read receipt). Unseen comments are returned first.
+        (read receipt). The agent must match the calling token's agent_name.
+        Unseen comments are returned first.
         """
-        await _require_any_principal()
+        principal = await _require_any_principal()
+        # Bind mark_seen_by to the authenticated principal, ignoring the
+        # caller-supplied agent for read-receipts, so a codex token can't mark
+        # comments seen-by-hermes. For token principals, principal.agent_name is
+        # used regardless of what the caller passed; for human-session principals
+        # (which never actually call this tool), the original agent arg applies.
+        mark_seen_by = principal.agent_name if principal.is_token else agent
         async with session() as s:
-            comments = await svc_list_comments(s, task_id, since_id, agent)
+            comments = await svc_list_comments(s, task_id, since_id, mark_seen_by)
             return [
                 {
                     "id": c.id,

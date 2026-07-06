@@ -67,6 +67,21 @@ def create_app() -> FastAPI:
 
     @contextlib.asynccontextmanager
     async def _lifespan(app: FastAPI):
+        # Refuse to serve with a known-insecure session secret when publicly
+        # deployed (https). itsdangerous signs the kanban_session cookie with
+        # settings.session_secret; a public placeholder lets anyone forge an
+        # admin cookie. We only enforce on https because dev/test runs on http
+        # and the dev default is intentionally insecure for local convenience.
+        lifespan_settings = get_settings()
+        if (
+            lifespan_settings.is_insecure_session_secret()
+            and lifespan_settings.public_url.startswith("https")
+        ):
+            raise RuntimeError(
+                "SESSION_SECRET must be set to a strong random value when "
+                "PUBLIC_URL is https. Generate one with: "
+                'python -c "import secrets; print(secrets.token_urlsafe(32))"'
+            )
         # Bootstrap the admin user BEFORE starting the MCP session manager so
         # the admin exists before any authenticated request can be served.
         await _bootstrap_admin()

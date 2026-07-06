@@ -110,3 +110,68 @@ async def test_token_authenticates_bearer(client):
 async def test_protected_route_401_without_creds(client):
     r = await client.get("/api/tasks")
     assert r.status_code == 401
+
+
+# --- Session secret detection (security guard, Fix 1) ---
+def test_insecure_session_secret_detection():
+    from agent_kanban.config import Settings
+
+    assert (
+        Settings(session_secret="dev-insecure-secret-change-me").is_insecure_session_secret()
+        is True
+    )
+    assert (
+        Settings(session_secret="please-change-me-in-production").is_insecure_session_secret()
+        is True
+    )
+    assert Settings(session_secret="").is_insecure_session_secret() is True
+    assert (
+        Settings(session_secret="a-real-random-secret-32-chars-long").is_insecure_session_secret()
+        is False
+    )
+
+
+# --- User-delete security guards (Fix 2) ---
+@pytest.mark.asyncio
+async def test_cannot_delete_self(client):
+    from agent_kanban.db import AsyncSessionLocal
+    from agent_kanban.models import User
+    from agent_kanban.auth import hash_password
+
+    async with AsyncSessionLocal() as session:
+        session.add(User(username="admin", password_hash=hash_password("pw"), is_admin=True))
+        await session.commit()
+    await client.post("/api/login", json={"username": "admin", "password": "pw"})
+    # /api/me returns the Principal; user_id is present for user principals.
+    me = (await client.get("/api/me")).json()
+    my_id = me["user_id"]
+    r = await client.delete(f"/api/users/{my_id}")
+    assert r.status_code == 400
+    assert "yourself" in r.json().get("detail", "").lower()
+
+
+@pytest.mark.asyncio
+async def test_cannot_delete_last_admin(client):
+    """Deleting the sole admin is blocked.
+
+    When the caller is themselves the only admin, BOTH the self-guard
+    ("cannot delete yourself") AND the last-admin guard ("cannot delete the
+    last admin") would fire; the self-guard fires first and is what the test
+    asserts on. This documents that the deletion path is rejected, exercising
+    at least one of the two guards. Isolating the last-admin guard alone
+    would require a second logged-in admin session (multi-session fixtures),
+    which isn't trivial in this client-based setup.
+    """
+    from agent_kanban.db import AsyncSessionLocal
+    from agent_kanban.models import User
+    from agent_kanban.auth import hash_password
+
+    async with AsyncSessionLocal() as session:
+        session.add(User(username="admin", password_hash=hash_password("pw"), is_admin=True))
+        await session.commit()
+    await client.post("/api/login", json={"username": "admin", "password": "pw"})
+    me = (await client.get("/api/me")).json()
+    my_id = me["user_id"]
+    # Deleting ourselves (the only admin) is rejected by both guards.
+    r = await client.delete(f"/api/users/{my_id}")
+    assert r.status_code == 400
