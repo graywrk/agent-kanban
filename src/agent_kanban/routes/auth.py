@@ -16,6 +16,7 @@ from agent_kanban.auth import (
 )
 from agent_kanban.db import get_session
 from agent_kanban.models import Token, User
+from agent_kanban.ratelimit import limiter
 
 router = APIRouter(prefix="/api", tags=["auth"])
 
@@ -39,7 +40,8 @@ class SetupBody(BaseModel):
 
 
 @router.post("/setup", status_code=201)
-async def setup(body: SetupBody, session: AsyncSession = Depends(get_session)):
+@limiter.limit("5/minute")
+async def setup(body: SetupBody, request: Request, session: AsyncSession = Depends(get_session)):
     """Create the first admin user. Only valid when no users exist (needs_setup)."""
     if not body.username.strip():
         raise HTTPException(400, "username must not be empty")
@@ -67,6 +69,7 @@ class LoginBody(BaseModel):
 
 
 @router.post("/login")
+@limiter.limit("10/minute")
 async def login(body: LoginBody, request: Request, session: AsyncSession = Depends(get_session)):
     result = await session.execute(select(User).where(User.username == body.username))
     user = result.scalars().first()
@@ -89,7 +92,8 @@ async def me(principal: Principal = Depends(get_current_principal)):
 
 # ---- WebSocket ticket (authed) ----
 @router.post("/ws-ticket")
-async def ws_ticket(principal: Principal = Depends(get_current_principal)):
+@limiter.limit("30/minute")
+async def ws_ticket(request: Request, principal: Principal = Depends(get_current_principal)):
     """Mint a single-use ticket for WebSocket authentication.
 
     The WS cannot set Authorization headers (browser limitation), so for
