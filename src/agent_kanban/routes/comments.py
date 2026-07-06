@@ -26,7 +26,7 @@ async def get_comments(
 async def add_comment(
     task_id: int,
     data: CommentCreate,
-    status: Optional[str] = Query(
+    status: Optional[TaskStatus] = Query(
         None, description="Override task status after comment. If omitted, review→in_progress."
     ),
     session: AsyncSession = Depends(get_session),
@@ -38,7 +38,7 @@ async def add_comment(
 
     # Resolve the target status: explicit query param wins; else auto review→in_progress.
     if status is not None:
-        target = TaskStatus(status)
+        target = status
     else:
         task = await get_task(session, task_id)
         target = TaskStatus.IN_PROGRESS if task.status == TaskStatus.REVIEW else None

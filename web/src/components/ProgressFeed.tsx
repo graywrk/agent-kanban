@@ -16,7 +16,10 @@ async function getHighlighter(): Promise<Highlighter> {
         themes: ["github-light", "github-dark"],
         langs: ["diff", "typescript", "javascript", "python", "bash", "json"],
       });
-    })();
+    })().catch((err) => {
+      highlighterPromise = null;  // allow retry on next call
+      throw err;
+    });
   }
   return highlighterPromise;
 }
@@ -128,7 +131,7 @@ function DiffItem({
       if (cancelled) return;
       const out = h.codeToHtml(content, { lang, theme: "github-light" });
       setHtml(out);
-    });
+    }).catch(() => {});
     return () => { cancelled = true; };
   }, [expanded, content, lang]);
 

@@ -77,3 +77,14 @@ async def test_comment_on_non_review_task_does_not_change_status(client):
     assert r.status_code == 201
     r = await client.get(f"/api/tasks/{task_id}")
     assert r.json()["status"] == "todo"
+
+
+@pytest.mark.asyncio
+async def test_comment_with_invalid_status_returns_422(client):
+    r = await client.post("/api/tasks", json={"title": "t"})
+    task_id = r.json()["id"]
+    r = await client.post(
+        f"/api/tasks/{task_id}/comments?status=bogus",
+        json={"author": "user", "content": "x"},
+    )
+    assert r.status_code == 422

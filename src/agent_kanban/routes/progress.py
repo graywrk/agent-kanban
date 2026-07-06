@@ -23,7 +23,7 @@ async def list_progress(task_id: int, session: AsyncSession = Depends(get_sessio
             "agent": e.agent,
             "kind": e.kind.value if hasattr(e.kind, "value") else e.kind,
             "payload": e.payload,
-            "created_at": e.created_at.isoformat(),
+            "created_at": e.created_at.isoformat() + "Z",
         }
         for e in result.scalars()
     ]
@@ -40,4 +40,4 @@ async def last_progress_timestamps(session: AsyncSession = Depends(get_session))
         .group_by(ProgressEvent.task_id)
     )
     result = await session.execute(stmt)
-    return {row.task_id: row.last_at.isoformat() for row in result.all()}
+    return {row.task_id: row.last_at.isoformat() + "Z" for row in result.all()}
