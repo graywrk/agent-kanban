@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from agent_kanban.events import event_bus
-from agent_kanban.git import GitError, collect_diff, resolve_base_branch
+from agent_kanban.git import GitError, collect_diff, collect_diffstats, resolve_base_branch
 from agent_kanban.models import (
     Artifact,
     Comment,
@@ -241,6 +241,7 @@ async def _maybe_collect_review_diff(
         return
     try:
         diff_text = await collect_diff(task.repo_path, base, task.branch)
+        diffstats = await collect_diffstats(task.repo_path, base, task.branch)
     except GitError as exc:
         session.add(
             ProgressEvent(
@@ -261,21 +262,22 @@ async def _maybe_collect_review_diff(
             )
         )
         return
-    files = _extract_diff_filenames(diff_text)
+    files = [s["path"] for s in diffstats]
+    stats = {
+        s["path"]: (
+            f"+{s['added']} -{s['deleted']}" if s["added"] >= 0 and s["deleted"] >= 0
+            else "binary"
+        )
+        for s in diffstats
+    }
     session.add(
         ProgressEvent(
             task_id=task.id,
             agent=agent,
             kind="diff",
-            payload={"content": diff_text, "files": files, "stats": {}},
+            payload={"content": diff_text, "files": files, "stats": stats},
         )
     )
-
-
-def _extract_diff_filenames(diff_text: str) -> list[str]:
-    """Pull affected file paths from a unified diff (best-effort)."""
-    import re
-    return list(dict.fromkeys(re.findall(r"^\+\+\+ b/(.+)$", diff_text, flags=re.MULTILINE)))
 
 
 async def request_review(

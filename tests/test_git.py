@@ -70,3 +70,22 @@ async def test_collect_diff_times_out_and_kills_process(tmp_repo):
     with pytest.raises(GitError, match="timed out"):
         # timeout_s=0 means wait_for fires immediately after the process is created.
         await collect_diff(tmp_repo, "main", "feat", timeout_s=0.0)
+
+
+@pytest.mark.asyncio
+async def test_collect_diffstats_returns_per_file_counts(tmp_repo):
+    from agent_kanban.git import collect_diffstats
+    stats = await collect_diffstats(tmp_repo, "main", "feat")
+    assert isinstance(stats, list)
+    assert len(stats) == 1
+    entry = stats[0]
+    assert entry["path"] == "README.md"
+    assert entry["added"] == 1
+    assert entry["deleted"] == 1
+
+
+@pytest.mark.asyncio
+async def test_collect_diffstats_empty_when_no_changes(tmp_repo):
+    from agent_kanban.git import collect_diffstats
+    stats = await collect_diffstats(tmp_repo, "main", "main")
+    assert stats == []

@@ -218,7 +218,9 @@ async def test_request_review_collects_diff_when_configured(session: AsyncSessio
     await set_task_branch(session, t.id, "codex", "feat/x")
 
     fake_diff = "--- a/f.txt\n+++ b/f.txt\n@@ -1 +1 @@\n-old\n+new\n"
-    with patch("agent_kanban.services.collect_diff", new=AsyncMock(return_value=fake_diff)):
+    fake_stats = [{"path": "f.txt", "added": 1, "deleted": 1}]
+    with patch("agent_kanban.services.collect_diff", new=AsyncMock(return_value=fake_diff)), \
+         patch("agent_kanban.services.collect_diffstats", new=AsyncMock(return_value=fake_stats)):
         await request_review(session, t.id, "codex", summary="review please")
 
     from sqlmodel import select
@@ -230,6 +232,8 @@ async def test_request_review_collects_diff_when_configured(session: AsyncSessio
     assert len(diff_events) == 1
     assert "old" in diff_events[0].payload["content"]
     assert "new" in diff_events[0].payload["content"]
+    assert diff_events[0].payload["files"] == ["f.txt"]
+    assert diff_events[0].payload["stats"]["f.txt"] == "+1 -1"
 
 
 @pytest.mark.asyncio
