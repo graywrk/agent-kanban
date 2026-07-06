@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import type { ProgressEvent } from "../types";
+import { ArtifactCard } from "./ArtifactCard";
+import type { ArtifactMeta, ProgressEvent } from "../types";
 
 // Shiki is loaded once for the whole feed.
 import type { Highlighter } from "shiki";
@@ -154,7 +155,6 @@ function DiffItem({
   );
 }
 
-// ArtifactTextItem is a placeholder until Task 6 swaps in the full ArtifactCard.
 function ArtifactTextItem({
   ts,
   agent,
@@ -166,15 +166,13 @@ function ArtifactTextItem({
   content: string;
   payload: { [k: string]: unknown };
 }) {
+  const artifact = (payload.artifact as ArtifactMeta | undefined) ?? { path: content, kind: "file" };
   return (
     <div style={{ background: "#fff", border: "1px solid #eee", padding: 8, borderRadius: 4 }}>
       <div style={{ fontSize: 11, color: "#666", marginBottom: 4 }}>
-        {ts} · <strong>{agent}</strong> · 📎 artifact
+        {ts} · <strong>{agent}</strong>
       </div>
-      <div style={{ fontSize: 14 }}>
-        <ReactMarkdown>{content}</ReactMarkdown>
-      </div>
-      <div style={{ fontSize: 11, color: "#999" }}>{JSON.stringify(payload.artifact ?? {})}</div>
+      <ArtifactCard artifact={artifact} description={content} />
     </div>
   );
 }
