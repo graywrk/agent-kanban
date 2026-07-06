@@ -290,3 +290,45 @@ async def test_patch_user_toggle_admin(client):
     r = await client.patch(f"/api/users/{pleb_id}", json={"is_admin": True})
     assert r.status_code == 200
     assert r.json()["is_admin"] is True
+
+
+@pytest.mark.asyncio
+async def test_patch_user_password_uses_acting_admin_current_password(client):
+    """PATCH user password verifies current_password against the ACTING admin, not the target.
+
+    Documents that the verifier reads the ACTING admin's hash (principal.user_id),
+    never the target user's. So an admin A changing user B's password must
+    supply A's current_password; supplying B's (the target's) password is
+    rejected with 403 even though it's a real password.
+    """
+    from agent_kanban.db import AsyncSessionLocal
+    from agent_kanban.models import User
+    from agent_kanban.auth import hash_password
+
+    async with AsyncSessionLocal() as session:
+        admin = User(username="admin", password_hash=hash_password("adminpw"), is_admin=True)
+        pleb = User(username="pleb", password_hash=hash_password("plebpw"), is_admin=False)
+        session.add(admin)
+        session.add(pleb)
+        await session.commit()
+        await session.refresh(admin)
+        await session.refresh(pleb)
+        pleb_id = pleb.id
+    # Login as admin.
+    await client.post("/api/login", json={"username": "admin", "password": "adminpw"})
+    # Try to change pleb's password using PLEB's current_password (must fail — 403).
+    # The verifier checks against the acting admin's hash, so pleb's password is wrong here.
+    r = await client.patch(
+        f"/api/users/{pleb_id}",
+        json={"current_password": "plebpw", "password": "newpass123"},
+    )
+    assert r.status_code == 403
+    # Now change pleb's password using ADMIN's current_password (must succeed).
+    r = await client.patch(
+        f"/api/users/{pleb_id}",
+        json={"current_password": "adminpw", "password": "newpass123"},
+    )
+    assert r.status_code == 200
+    # pleb can now log in with the new password.
+    r = await client.post("/api/login", json={"username": "pleb", "password": "newpass123"})
+    assert r.status_code == 200

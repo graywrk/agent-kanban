@@ -119,6 +119,22 @@ async def session(db_url):
 
 
 @pytest.fixture(autouse=True)
+def _disable_rate_limiting():
+    """Disable slowapi in tests so suite-wide auth flows don't trip limits.
+
+    The in-memory limiter keys on client IP, and every test shares 127.0.0.1,
+    so without disabling, the cumulative login/logout calls across the suite
+    would exceed the per-minute threshold and turn unrelated tests into 429s.
+    Tests that exercise the limiter re-enable it locally and reset/restore.
+    """
+    from agent_kanban.ratelimit import limiter
+    saved = limiter.enabled
+    limiter.enabled = False
+    yield
+    limiter.enabled = saved
+
+
+@pytest.fixture(autouse=True)
 def _stub_mcp_principal(monkeypatch):
     """Stub the MCP principal verifiers for in-process tool calls.
 

@@ -5,10 +5,14 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from agent_kanban.config import get_settings
 from agent_kanban.mcp_server import MCPAuthMiddleware, create_mcp
+from agent_kanban.ratelimit import limiter
 from agent_kanban.routes import artifacts, auth as auth_routes, comments, progress, projects, tasks, ws
 
 
@@ -83,6 +87,12 @@ def create_app() -> FastAPI:
             yield
 
     app = FastAPI(title="Agent Kanban", version="0.1.0", lifespan=_lifespan)
+    # Rate limiting (slowapi). Registered before routers so the SlowAPIMiddleware
+    # wraps every route. The Limiter is module-level (single-process in-memory);
+    # swap storage_uri for Redis to share state across workers.
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_middleware(SlowAPIMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,

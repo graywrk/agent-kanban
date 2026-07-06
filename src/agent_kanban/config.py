@@ -22,6 +22,14 @@ class Settings(BaseSettings):
         validation_alias="AGENT_KANBAN_BOOTSTRAP_ADMIN_PASSWORD",
     )
 
+    # Rate-limit thresholds (documentation strings; the slowapi decorators use
+    # literal values per slowapi's import-time decoration model). Override via
+    # env if you need to tune, but note the decorator itself is static — change
+    # these only for reference/observability.
+    rate_limit_login: str = "10/minute"
+    rate_limit_setup: str = "5/minute"
+    rate_limit_ws_ticket: str = "30/minute"
+
     # Known-insecure placeholder values shipped in the repo. The startup guard in
     # server._lifespan refuses to serve when one of these is in effect AND the
     # board is publicly deployed (PUBLIC_URL is https), since itsdangerous signs

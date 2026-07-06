@@ -130,3 +130,39 @@ async def test_ws_rejects_invalid_ticket(db_url):
             with client.websocket_connect("/ws?ticket=not-a-real-ticket"):
                 pass
         assert exc.value.code == 1008
+
+
+@pytest.mark.asyncio
+async def test_ws_token_param_no_longer_accepted(db_url):
+    """Phase 6 removed ?token=; a bearer in the URL no longer authenticates the WS.
+
+    A FRESH TestClient (no /api/login, so no session cookie) connects with only
+    ?token=<valid bearer>. Since ws.py no longer reads the token param and there
+    is no cookie, the socket must be rejected with WS 1008. This proves the
+    bearer-in-URL path is gone even when the bearer is otherwise valid.
+
+    Seeding follows the _login_admin helper's pattern (raw asyncpg to avoid
+    cross-loop pooled-connection crashes between the test loop and TestClient's
+    own loop). We mint the token via the authed client's API, then drive the
+    rejection on a separate cookie-less client.
+    """
+    from agent_kanban.config import get_settings
+    get_settings.cache_clear()
+    app = create_app()
+
+    with TestClient(app) as authed:
+        await _login_admin(authed)
+        # Mint a real, valid bearer token via the API.
+        bearer = authed.post("/api/tokens", json={"agent_name": "codex"}).json()["token"]
+
+    # Fresh app + client with NO session cookie — ?token= alone must be
+    # rejected. A second create_app() is required because the MCP session
+    # manager is single-use per app instance (re-entering one app's lifespan
+    # raises RuntimeError), per create_app()'s docstring. The token row lives
+    # in the shared Postgres DB so it is visible to the new app regardless.
+    anon_app = create_app()
+    with TestClient(anon_app) as anon:
+        with pytest.raises(WebSocketDisconnect) as exc:
+            with anon.websocket_connect(f"/ws?token={bearer}"):
+                pass
+        assert exc.value.code == 1008

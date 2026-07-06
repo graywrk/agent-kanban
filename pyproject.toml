@@ -19,6 +19,7 @@ dependencies = [
     "python-multipart>=0.0.12",
     "bcrypt>=4.2",
     "itsdangerous>=2.2",
+    "slowapi>=0.1.9",
 ]
 
 [project.optional-dependencies]
