@@ -173,11 +173,13 @@ async def post_progress(
     payload: dict = {"content": data.content}
     if data.kind.value == "artifact_ref" and data.artifact:
         payload["artifact"] = data.artifact
+    blocked = False
     if data.kind.value == "status_change" and data.status:
         payload["status"] = data.status
         if data.status.get("to") == "blocked":
             task.status = TaskStatus.BLOCKED
             task.updated_at = datetime.utcnow()
+            blocked = True
     ev = ProgressEvent(
         task_id=task_id,
         agent=data.agent,
@@ -187,6 +189,13 @@ async def post_progress(
     session.add(ev)
     await session.commit()
     await session.refresh(ev)
+    if blocked:
+        # Lifecycle event fans out to the board channel AND task:{id}. Skip the
+        # redundant task-channel "progress" publish below so subscribers see a
+        # single authoritative "task_blocked" event for this transition.
+        await session.refresh(task)
+        await _publish_task_event("board", "task_blocked", task)
+        return ev
     await event_bus.publish(
         f"task:{task_id}",
         {"type": "progress", "event_id": ev.id, "kind": ev.kind.value},
@@ -253,8 +262,11 @@ async def list_comments(
     result = await session.execute(stmt)
     comments = list(result.scalars())
     if mark_seen_by is not None:
+        # seen_by_agent is a read-receipt for messages TO the agent. The reading
+        # agent should not mark its own comments as "seen by itself" — they were
+        # authored by it, never "unseen" from its perspective.
         for c in comments:
-            if not c.seen_by_agent:
+            if not c.seen_by_agent and c.author != mark_seen_by:
                 c.seen_by_agent = True
         await session.commit()
     return comments

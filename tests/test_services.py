@@ -111,3 +111,48 @@ async def test_post_artifact_rejects_path_outside_sandbox(session: AsyncSession)
             t.id,
             ArtifactCreate(agent="codex", kind="log", path="/etc/passwd"),
         )
+
+
+@pytest.mark.asyncio
+async def test_post_progress_blocked_publishes_to_board(session: AsyncSession):
+    """BLOCKED transition must fan out to the board channel, not just task:{id}."""
+    from agent_kanban.events import event_bus
+    import asyncio
+    received = []
+    async def consumer():
+        async for evt in event_bus.subscribe("board"):
+            received.append(evt)
+            break
+    task = await create_task(session, TaskCreate(title="t", status=TaskStatus.READY))
+    await claim_task(session, task.id, "codex")
+    consumer_task = asyncio.create_task(consumer())
+    await asyncio.sleep(0.05)
+    await post_progress(
+        session,
+        task.id,
+        ProgressCreate(
+            agent="codex",
+            kind=ProgressKind.STATUS_CHANGE,
+            content="stuck on env",
+            status={"from": "in_progress", "to": "blocked", "note": "need user input"},
+        ),
+    )
+    await asyncio.wait_for(consumer_task, timeout=1.0)
+    assert any(evt.get("type") == "task_blocked" for evt in received)
+
+
+@pytest.mark.asyncio
+async def test_list_comments_marks_only_other_authors_seen(session: AsyncSession):
+    """get_comments must not mark the calling agent's own comments as seen."""
+    from agent_kanban.services import post_comment, list_comments
+    t = await create_task(session, TaskCreate(title="t", status=TaskStatus.TODO))
+    # codex writes a comment; user writes a comment
+    await post_comment(session, t.id, "codex", "i am working")
+    await post_comment(session, t.id, "user", "good luck")
+    # codex reads comments
+    comments = await list_comments(session, t.id, since_id=None, mark_seen_by="codex")
+    # codex's own comment must remain seen_by_agent=False (it's not a message TO codex)
+    codex_own = [c for c in comments if c.author == "codex"][0]
+    user_to_codex = [c for c in comments if c.author == "user"][0]
+    assert codex_own.seen_by_agent is False
+    assert user_to_codex.seen_by_agent is True
