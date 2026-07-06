@@ -1,8 +1,56 @@
 
+import os
+
+import asyncpg
 import pytest
 from starlette.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from agent_kanban.server import create_app
+
+
+async def _login_admin(client):
+    """Create an admin user and log in so the TestClient carries the session cookie.
+
+    Seed via raw asyncpg (not SQLAlchemy's AsyncSessionLocal) so we don't bind a
+    pooled connection to this test loop — TestClient runs the app on its own
+    event loop, and a cross-loop pooled connection crashes asyncpg.
+
+    Uses ON CONFLICT (upsert) because the app lifespan now bootstraps an admin
+    user on first run (empty users table); this resets its password to a known
+    value so the subsequent login succeeds regardless of whether bootstrap ran.
+    """
+    from agent_kanban.auth import hash_password
+    from datetime import UTC, datetime
+    url = os.environ["DATABASE_URL"].replace("+asyncpg", "")
+    conn = await asyncpg.connect(url)
+    try:
+        await conn.execute(
+            'INSERT INTO "user" (username, password_hash, is_admin, created_at) '
+            "VALUES ($1, $2, $3, $4) "
+            'ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash',
+            "admin",
+            hash_password("pw"),
+            True,
+            datetime.now(UTC).replace(tzinfo=None),
+        )
+    finally:
+        await conn.close()
+    client.post("/api/login", json={"username": "admin", "password": "pw"})
+
+
+@pytest.mark.asyncio
+async def test_ws_rejects_unauthenticated(db_url):
+    """An unauthenticated WebSocket (no session cookie, no bearer) is rejected with code 1008."""
+    from agent_kanban.config import get_settings
+    get_settings.cache_clear()
+    app = create_app()
+
+    with TestClient(app) as client:
+        with pytest.raises(WebSocketDisconnect) as exc:
+            with client.websocket_connect("/ws"):
+                pass
+        assert exc.value.code == 1008
 
 
 @pytest.mark.asyncio
@@ -12,6 +60,7 @@ async def test_ws_board_channel_receives_task_created(db_url):
     app = create_app()
 
     with TestClient(app) as client:
+        await _login_admin(client)
         with client.websocket_connect("/ws") as ws:
             # Trigger a task creation via REST.
             r = client.post("/api/tasks", json={"title": "x"})
@@ -28,6 +77,7 @@ async def test_ws_task_channel_filtered(db_url):
     app = create_app()
 
     with TestClient(app) as client:
+        await _login_admin(client)
         # Create two tasks first.
         t1 = client.post("/api/tasks", json={"title": "a"}).json()
         t2 = client.post("/api/tasks", json={"title": "b"}).json()

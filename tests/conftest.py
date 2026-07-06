@@ -12,6 +12,7 @@ import uuid
 import asyncpg
 import pytest
 import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 TEST_DB_TEMPLATE = "postgresql://kanban:kanban@localhost:5436/postgres"
@@ -99,7 +100,8 @@ async def _clean_tables(db_url):
 
             await conn.execute(
                 text(
-                    "TRUNCATE TABLE project, task, progressevent, comment, artifact "
+                    "TRUNCATE TABLE project, task, progressevent, comment, artifact, "
+                    '"user", token '
                     "RESTART IDENTITY CASCADE"
                 )
             )
@@ -114,3 +116,51 @@ async def session(db_url):
     async with factory() as s:
         yield s
     await engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def _stub_mcp_principal(monkeypatch):
+    """Stub the MCP principal verifiers for in-process tool calls.
+
+    `mcp.call_tool` runs tools directly — there is no HTTP request, so the
+    ``_mcp_principal`` ContextVar (populated by MCPAuthMiddleware during real
+    serving) is empty and the verifiers would reject every call. We patch the
+    two verifier functions on the mcp_server module so they return a fixed
+    Principal(agent_name="codex") without touching the request path. Tests that
+    pass ``agent="codex"`` pass; tests asserting authz-rejection (agent !=
+    codex) still fail as intended. The e2e test overrides this to "hermes" via
+    its own monkeypatch (last write wins on the shared function-scoped
+    monkeypatch). Harmless for REST-only tests that never invoke MCP tools.
+    """
+    from agent_kanban import mcp_server
+    from agent_kanban.auth import Principal
+
+    async def _matching(agent):
+        if agent != "codex":
+            raise PermissionError(f"agent {agent!r} != 'codex'")
+        return Principal(kind="token", agent_name="codex")
+
+    async def _any():
+        return Principal(kind="token", agent_name="codex")
+
+    monkeypatch.setattr(mcp_server, "_require_matching_agent", _matching)
+    monkeypatch.setattr(mcp_server, "_require_any_principal", _any)
+
+
+@pytest_asyncio.fixture
+async def authed_client(db_url):
+    """An httpx AsyncClient with a logged-in admin session."""
+    from agent_kanban.config import get_settings
+    get_settings.cache_clear()
+    from agent_kanban.server import create_app
+    from agent_kanban.db import AsyncSessionLocal
+    from agent_kanban.models import User
+    from agent_kanban.auth import hash_password
+    async with AsyncSessionLocal() as session:
+        session.add(User(username="admin", password_hash=hash_password("pw"), is_admin=True))
+        await session.commit()
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        await c.post("/api/login", json={"username": "admin", "password": "pw"})
+        yield c

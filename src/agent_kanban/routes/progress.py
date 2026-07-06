@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agent_kanban.auth import Principal, get_current_principal
 from agent_kanban.db import get_session
 from agent_kanban.models import ProgressEvent
 
@@ -9,7 +10,11 @@ router = APIRouter(tags=["progress"])
 
 
 @router.get("/api/tasks/{task_id}/progress")
-async def list_progress(task_id: int, session: AsyncSession = Depends(get_session)):
+async def list_progress(
+    task_id: int,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_current_principal),
+):
     stmt = (
         select(ProgressEvent)
         .where(ProgressEvent.task_id == task_id)
@@ -30,7 +35,10 @@ async def list_progress(task_id: int, session: AsyncSession = Depends(get_sessio
 
 
 @router.get("/api/progress/last")
-async def last_progress_timestamps(session: AsyncSession = Depends(get_session)):
+async def last_progress_timestamps(
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_current_principal),
+):
     """Map task_id → ISO timestamp of its most recent progress_event (for live indicators)."""
     stmt = (
         select(

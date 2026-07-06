@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agent_kanban.auth import Principal, get_current_principal
 from agent_kanban.db import get_session
 from agent_kanban.models import Artifact, Task
 
@@ -30,7 +31,11 @@ def _is_path_allowed(path: str, allowed_roots: list[str]) -> bool:
 
 
 @router.get("/{artifact_id}/content")
-async def get_artifact_content(artifact_id: int, session: AsyncSession = Depends(get_session)):
+async def get_artifact_content(
+    artifact_id: int,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_current_principal),
+):
     art = await session.get(Artifact, artifact_id)
     if art is None:
         raise HTTPException(404, "artifact not found")

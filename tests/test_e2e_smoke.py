@@ -9,14 +9,18 @@ Both the REST client and the in-process MCP tools resolve their DB sessions from
 the same DATABASE_URL (pointed at the per-test throwaway DB by the `db_url`
 fixture + `get_settings.cache_clear()`), so the two sides observe each other's
 commits in real time — just like production, only without a network hop.
+
+The agent side authenticates with a real bearer token minted by the admin via
+``POST /api/tokens`` (agent_name="hermes"). Since the in-process MCP tools
+bypass HTTP, we stub the verifiers to surface that Principal(agent_name="hermes")
+for the test — exercising the real token-creation path while keeping the tool
+calls deterministic.
 """
 import json
 
 import pytest
-from httpx import ASGITransport, AsyncClient
 
 from agent_kanban.mcp_server import mcp
-from agent_kanban.server import create_app
 
 
 def _to_dict(result):
@@ -47,27 +51,40 @@ def _to_dict(result):
     return result
 
 
-@pytest.fixture
-async def client(db_url):
-    from agent_kanban.config import get_settings
-
-    get_settings.cache_clear()
-    app = create_app()
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
-        yield c
-
-
 @pytest.mark.asyncio
-async def test_full_phase1_journey(client):
+async def test_full_phase1_journey(authed_client, monkeypatch):
+    # 0. Mint a real bearer token for the "hermes" agent via the admin UI, and
+    #    stub the MCP verifiers to surface that Principal for in-process tool
+    #    calls (call_tool bypasses HTTP, so MCPAuthMiddleware never runs).
+    from agent_kanban import mcp_server
+    from agent_kanban.auth import Principal
+
+    r = await authed_client.post(
+        "/api/tokens", json={"agent_name": "hermes", "description": "e2e"}
+    )
+    assert r.status_code == 201
+    token = r.json()["token"]
+    assert token
+
+    async def _matching(agent):
+        if agent != "hermes":
+            raise PermissionError(f"agent {agent!r} != 'hermes'")
+        return Principal(kind="token", agent_name="hermes")
+
+    async def _any():
+        return Principal(kind="token", agent_name="hermes")
+
+    monkeypatch.setattr(mcp_server, "_require_matching_agent", _matching)
+    monkeypatch.setattr(mcp_server, "_require_any_principal", _any)
+
     # 1. User creates a task via UI (status defaults to todo).
-    r = await client.post("/api/tasks", json={"title": "Write README", "tags": ["docs"]})
+    r = await authed_client.post("/api/tasks", json={"title": "Write README", "tags": ["docs"]})
     assert r.status_code == 201
     task_id = r.json()["id"]
     assert r.json()["status"] == "todo"
 
     # 2. User moves it to ready (drag-and-drop in UI).
-    r = await client.patch(f"/api/tasks/{task_id}", json={"status": "ready"})
+    r = await authed_client.patch(f"/api/tasks/{task_id}", json={"status": "ready"})
     assert r.status_code == 200
     assert r.json()["status"] == "ready"
 
@@ -95,7 +112,7 @@ async def test_full_phase1_journey(client):
     )
 
     # 5. UI sees the progress event.
-    r = await client.get(f"/api/tasks/{task_id}/progress")
+    r = await authed_client.get(f"/api/tasks/{task_id}/progress")
     assert r.status_code == 200
     events = r.json()
     assert len(events) == 1
@@ -108,6 +125,6 @@ async def test_full_phase1_journey(client):
     )
 
     # 7. Board reflects done.
-    r = await client.get(f"/api/tasks/{task_id}")
+    r = await authed_client.get(f"/api/tasks/{task_id}")
     assert r.status_code == 200
     assert r.json()["status"] == "done"

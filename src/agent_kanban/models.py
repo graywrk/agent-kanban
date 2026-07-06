@@ -96,3 +96,21 @@ class Artifact(SQLModel, table=True):
     kind: str
     description: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC).replace(tzinfo=None))
+
+
+class User(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    username: str = Field(index=True, unique=True)
+    password_hash: str
+    is_admin: bool = False
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC).replace(tzinfo=None))
+
+
+class Token(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    agent_name: str = Field(index=True)
+    token_hash: str  # bcrypt hash of the opaque token
+    description: Optional[str] = None
+    created_by_user_id: int = Field(foreign_key="user.id")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC).replace(tzinfo=None))
+    last_used_at: Optional[datetime] = None

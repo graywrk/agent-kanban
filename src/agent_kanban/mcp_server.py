@@ -16,17 +16,18 @@ Session resolution: each tool resolves the engine from current settings on
 every call via `agent_kanban.db._engine_for(get_settings().database_url)` —
 the same dynamic pattern the REST routes use (see `db.get_session`). A test
 that overrides DATABASE_URL (and clears the settings cache) transparently
-routes MCP tool calls to the throwaway DB; we intentionally avoid the
-import-time-bound `AsyncSessionLocal`, which would stay pinned to the
-production URL.
+routes MCP tool calls to the throwaway DB.
 """
+import contextvars
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from mcp.server.fastmcp import FastMCP
 
+from agent_kanban.auth import Principal, _resolve_bearer
 from agent_kanban.config import get_settings
 from agent_kanban.db import _engine_for
 from agent_kanban.models import ProgressKind, TaskStatus  # noqa: F401
@@ -44,6 +45,88 @@ from agent_kanban.services import (
     set_task_branch as svc_set_task_branch,
     set_task_pr as svc_set_task_pr,
 )
+
+# --- MCP principal resolution -------------------------------------------------
+# The pinned `mcp` SDK (1.28.x) does NOT expose the underlying Starlette
+# request to tool functions (no `mcp.server.fastmcp.context.get_http_request`).
+# We resolve the bearer Principal in a Starlette middleware that wraps the
+# mounted /mcp app and stores the resolved Principal (or None) in a ContextVar;
+# the verifiers below read that ContextVar. Resolution happens once per HTTP
+# request and is shared by every tool invoked within it. In-process
+# `mcp.call_tool` calls (tests, programmatic use) bypass HTTP entirely — tests
+# monkeypatch the verifiers (see tests/test_mcp_server.py) so the ContextVar is
+# never consulted in that path.
+_mcp_principal: contextvars.ContextVar[Optional[Principal]] = contextvars.ContextVar(
+    "_mcp_principal", default=None
+)
+
+
+class MCPAuthMiddleware:
+    """ASGI middleware that resolves a Principal from the Authorization header.
+
+    Mounted around the FastMCP streamable-HTTP app in server.create_app(). It
+    reads ``Authorization: Bearer <token>`` on every /mcp request, resolves it
+    to a Principal via the shared token lookup, and stores the result (None if
+    absent/invalid) in ``_mcp_principal`` for the tool functions to read. It
+    never blocks — enforcement is the verifiers' job so the failure surfaces as
+    a tool result, not an HTTP error, which is the intended agent UX.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        principal: Optional[Principal] = None
+        if scope["type"] == "http":
+            # Pull the Authorization header out of the raw ASGI scope without
+            # constructing a full Starlette Request (cheaper, and avoids
+            # consuming the receive channel).
+            for hdr_name, hdr_value in scope.get("headers", []):
+                if hdr_name.lower() == b"authorization":
+                    authz = hdr_value.decode("latin-1")
+                    if authz.lower().startswith("bearer "):
+                        token_value = authz[7:].strip()
+                        from agent_kanban.db import AsyncSessionLocal
+
+                        async with AsyncSessionLocal() as s:
+                            principal = await _resolve_bearer(s, token_value)
+                    break
+        token = _mcp_principal.set(principal)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            _mcp_principal.reset(token)
+
+
+async def _require_matching_agent(agent: str) -> Principal:
+    """Resolve the MCP principal and verify the ``agent`` arg matches it.
+
+    Used by all mutation tools (claim_task, post_progress, ...). Raises
+    PermissionError if no token authenticated the request, or if the supplied
+    ``agent`` differs from the token's bound ``agent_name``. The error surfaces
+    to the agent as a tool result (the SDK converts raised exceptions).
+    """
+    principal = _mcp_principal.get()
+    if principal is None:
+        raise PermissionError("authentication required (Bearer token)")
+    if agent != principal.agent_name:
+        raise PermissionError(
+            f"agent {agent!r} does not match the authenticated token's "
+            f"agent_name {principal.agent_name!r}"
+        )
+    return principal
+
+
+async def _require_any_principal() -> Principal:
+    """Resolve the MCP principal, requiring only that one exists.
+
+    Used by read tools (get_next_task, list_tasks, get_comments): any
+    authenticated principal may read; the agent arg is not bound.
+    """
+    principal = _mcp_principal.get()
+    if principal is None:
+        raise PermissionError("authentication required (Bearer token)")
+    return principal
 
 
 @asynccontextmanager
@@ -113,6 +196,7 @@ def create_mcp() -> FastMCP:
 
         Does NOT claim the task. Call claim_task to take it.
         """
+        await _require_any_principal()
         async with session() as s:
             task = await svc_get_next_task(s, tags_any, tags_all, exclude_tags)
             if task is None:
@@ -125,6 +209,7 @@ def create_mcp() -> FastMCP:
 
         Returns {ok: bool, reason: str?, task: Task?}.
         """
+        await _require_matching_agent(agent)
         async with session() as s:
             result = await svc_claim_task(s, task_id, agent)
             return {
@@ -138,6 +223,7 @@ def create_mcp() -> FastMCP:
         status: Optional[str] = None, tags_any: Optional[list[str]] = None
     ) -> list[dict]:
         """List tasks, optionally filtered by status and/or tags. Does not claim."""
+        await _require_any_principal()
         status_enum = TaskStatus(status) if status else None
         async with session() as s:
             tasks = await svc_list_tasks(s, status_enum, tags_any)
@@ -161,6 +247,7 @@ def create_mcp() -> FastMCP:
 
         Requires task.claimed_by == agent.
         """
+        await _require_matching_agent(agent)
         async with session() as s:
             ev = await svc_post_progress(
                 s,
@@ -184,6 +271,7 @@ def create_mcp() -> FastMCP:
         task_id: int, agent: str, summary: Optional[str] = None
     ) -> dict:
         """Mark a task done. Requires task.claimed_by == agent."""
+        await _require_matching_agent(agent)
         async with session() as s:
             task = await svc_complete_task(s, task_id, agent, summary)
             return _task_to_dict(task)
@@ -193,6 +281,7 @@ def create_mcp() -> FastMCP:
         task_id: int, agent: str, summary: Optional[str] = None
     ) -> dict:
         """Mark a task ready for review. Requires task.claimed_by == agent."""
+        await _require_matching_agent(agent)
         async with session() as s:
             task = await svc_request_review(s, task_id, agent, summary)
             return _task_to_dict(task)
@@ -204,10 +293,18 @@ def create_mcp() -> FastMCP:
         """List comments for a task since a given comment id.
 
         If agent is provided, marks the returned comments as seen by that agent
-        (read receipt). Unseen comments are returned first.
+        (read receipt). The agent must match the calling token's agent_name.
+        Unseen comments are returned first.
         """
+        principal = await _require_any_principal()
+        # Bind mark_seen_by to the authenticated principal, ignoring the
+        # caller-supplied agent for read-receipts, so a codex token can't mark
+        # comments seen-by-hermes. For token principals, principal.agent_name is
+        # used regardless of what the caller passed; for human-session principals
+        # (which never actually call this tool), the original agent arg applies.
+        mark_seen_by = principal.agent_name if principal.is_token else agent
         async with session() as s:
-            comments = await svc_list_comments(s, task_id, since_id, agent)
+            comments = await svc_list_comments(s, task_id, since_id, mark_seen_by)
             return [
                 {
                     "id": c.id,
@@ -222,6 +319,7 @@ def create_mcp() -> FastMCP:
     @mcp.tool()
     async def post_comment(task_id: int, agent: str, content: str) -> dict:
         """Post a comment authored by the calling agent."""
+        await _require_matching_agent(agent)
         async with session() as s:
             c = await svc_post_comment(s, task_id, agent, content)
             return {"id": c.id, "created_at": c.created_at.isoformat()}
@@ -238,6 +336,7 @@ def create_mcp() -> FastMCP:
 
         Requires task.claimed_by == agent.
         """
+        await _require_matching_agent(agent)
         async with session() as s:
             art = await svc_post_artifact(
                 s,
@@ -255,6 +354,7 @@ def create_mcp() -> FastMCP:
         Stores branch on the task so the UI can show it and request_review can
         collect a diff against the base branch. Requires task.claimed_by == agent.
         """
+        await _require_matching_agent(agent)
         async with session() as s:
             task = await svc_set_task_branch(s, task_id, agent, branch)
             return _task_to_dict(task)
@@ -267,6 +367,7 @@ def create_mcp() -> FastMCP:
 
         status: "open" | "merged" | "closed". Requires task.claimed_by == agent.
         """
+        await _require_matching_agent(agent)
         async with session() as s:
             task = await svc_set_task_pr(s, task_id, agent, pr_url, status)
             return _task_to_dict(task)
