@@ -57,8 +57,27 @@ mcp_servers:
 
 Then instruct your agent: "Check the kanban board for tasks via get_next_task."
 
+## Agent workflow
+
+1. Create a task in the UI. It starts in `todo`.
+2. Drag it to the `READY` column. It's now available to agents via `get_next_task`.
+3. Instruct your agent (e.g. Codex, Hermes) to check the board:
+   - Call `get_next_task` to discover work.
+   - Call `claim_task` to take it.
+   - Call `post_progress` to report what it's doing.
+   - Call `request_review` when ready for your review, or `complete_task` when done.
+4. Watch progress events stream into the card detail view in real time.
+5. Add comments to give the agent follow-up instructions; the agent reads them via `get_comments`.
+
+Agents must pass their identifier as the `agent` argument to mutation tools
+(`claim_task`, `post_progress`, `complete_task`, `request_review`, `post_comment`,
+`post_artifact`). The board authorizes mutations by checking `claimed_by == agent`.
+
 ## Docker
 ```bash
 docker compose up -d
 ```
-Runs the app on :7331 and Postgres on :5436 (host port).
+Runs the app on :7331 with Postgres in an internal-only container (not exposed to
+the host). The app connects to it over the compose network as `postgres:5432`.
+For local dev against a host-visible Postgres, see the standalone container note
+in "Database" above (port 5436).
