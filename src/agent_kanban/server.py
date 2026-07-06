@@ -5,10 +5,11 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.sessions import SessionMiddleware
 
 from agent_kanban.config import get_settings
 from agent_kanban.mcp_server import create_mcp
-from agent_kanban.routes import artifacts, comments, progress, projects, tasks, ws
+from agent_kanban.routes import artifacts, auth as auth_routes, comments, progress, projects, tasks, ws
 
 
 def create_app() -> FastAPI:
@@ -37,11 +38,19 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=settings.session_secret,
+        session_cookie="kanban_session",
+        same_site="lax",
+        https_only=settings.public_url.startswith("https"),
+    )
     app.include_router(projects.router)
     app.include_router(tasks.router)
     app.include_router(progress.router)
     app.include_router(comments.router)
     app.include_router(artifacts.router)
+    app.include_router(auth_routes.router)
     app.include_router(ws.router)
 
     # Mount MCP HTTP transport at /mcp. With FastMCP's streamable_http_path="/",

@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     port: int = 7331
     cors_origins: list[str] = ["http://localhost:5173"]
     artifacts_dir: str = "~/.agent-kanban/artifacts"
+    session_secret: str = "dev-insecure-secret-change-me"  # override via env in prod
+    public_url: str = "http://localhost:7331"
+    bootstrap_admin_username: str = "admin"
 
 
 @lru_cache

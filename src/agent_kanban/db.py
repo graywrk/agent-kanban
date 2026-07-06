@@ -20,10 +20,24 @@ def _engine_for(url: str) -> AsyncEngine:
     return engine
 
 
-# Module-level engine/session kept for backward-compat with any importer. The
-# FastAPI dependency below resolves against current settings so overrides win.
+# Module-level engine kept for backward-compat with any importer. The FastAPI
+# dependency below resolves against current settings so overrides win.
 engine = _engine_for(get_settings().database_url)
-AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+def AsyncSessionLocal() -> AsyncSession:  # noqa: N802 - keep call-site name
+    """Return an AsyncSession bound to the *current* DATABASE_URL.
+
+    Resolving live (rather than pinning a sessionmaker at import time) ensures
+    env-var overrides — e.g. per-test throwaway databases — take effect for any
+    caller that imports this name, matching ``get_session``'s behaviour.
+    """
+    factory = async_sessionmaker(
+        _engine_for(get_settings().database_url),
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    return factory()
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
