@@ -41,6 +41,8 @@ from agent_kanban.services import (
     post_comment as svc_post_comment,
     post_progress as svc_post_progress,
     request_review as svc_request_review,
+    set_task_branch as svc_set_task_branch,
+    set_task_pr as svc_set_task_pr,
 )
 
 
@@ -71,6 +73,7 @@ def _task_to_dict(task) -> dict:
         "project_id": task.project_id,
         "branch": task.branch,
         "pr_url": task.pr_url,
+        "pr_status": task.pr_status,
     }
 
 
@@ -238,6 +241,29 @@ def create_mcp() -> FastMCP:
                 ),
             )
             return {"id": art.id, "path": art.path, "kind": art.kind}
+
+    @mcp.tool()
+    async def set_task_branch(task_id: int, agent: str, branch: str) -> dict:
+        """Report the working branch the agent created for this task.
+
+        Stores branch on the task so the UI can show it and request_review can
+        collect a diff against the base branch. Requires task.claimed_by == agent.
+        """
+        async with session() as s:
+            task = await svc_set_task_branch(s, task_id, agent, branch)
+            return _task_to_dict(task)
+
+    @mcp.tool()
+    async def set_task_pr(
+        task_id: int, agent: str, pr_url: str, status: str
+    ) -> dict:
+        """Report a pull request URL and its status for this task.
+
+        status: "open" | "merged" | "closed". Requires task.claimed_by == agent.
+        """
+        async with session() as s:
+            task = await svc_set_task_pr(s, task_id, agent, pr_url, status)
+            return _task_to_dict(task)
 
     return mcp
 

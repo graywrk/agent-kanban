@@ -228,7 +228,7 @@ async def test_post_artifact_rejects_wrong_agent(session: AsyncSession):
 
 @pytest.mark.asyncio
 async def test_tools_list_eight_tools_registered():
-    """Sanity: all 8 tools are registered with FastMCP."""
+    """Sanity: all 9 core tools + 2 Phase 3 tools are registered with FastMCP."""
     tools = await mcp.list_tools()
     names = {t.name for t in tools}
     expected = {
@@ -241,5 +241,54 @@ async def test_tools_list_eight_tools_registered():
         "get_comments",
         "post_comment",
         "post_artifact",
+        "set_task_branch",
+        "set_task_pr",
     }
     assert expected.issubset(names), f"missing: {expected - names}"
+    assert len(names) == 11, f"expected 11 tools, got {len(names)}: {names}"
+
+
+@pytest.mark.asyncio
+async def test_set_task_branch_via_mcp(session: AsyncSession):
+    t = await create_task(session, TaskCreate(title="t", status=TaskStatus.READY))
+    await mcp.call_tool("claim_task", {"task_id": t.id, "agent": "codex"})
+    result = await mcp.call_tool(
+        "set_task_branch", {"task_id": t.id, "agent": "codex", "branch": "feat/x"}
+    )
+    data = _to_dict(result)
+    # The branch field may sit at top level or be nested under "result"
+    # depending on the SDK wrapping for the pinned version; both are fine.
+    flat = data if isinstance(data, dict) and "branch" in data else data.get("result", data)
+    assert flat["branch"] == "feat/x"
+
+
+@pytest.mark.asyncio
+async def test_set_task_branch_rejects_non_claimer(session: AsyncSession):
+    t = await create_task(session, TaskCreate(title="t", status=TaskStatus.READY))
+    await mcp.call_tool("claim_task", {"task_id": t.id, "agent": "codex"})
+    with pytest.raises(Exception):
+        await mcp.call_tool(
+            "set_task_branch",
+            {"task_id": t.id, "agent": "hermes", "branch": "feat/y"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_set_task_pr_via_mcp(session: AsyncSession):
+    t = await create_task(session, TaskCreate(title="t", status=TaskStatus.READY))
+    await mcp.call_tool("claim_task", {"task_id": t.id, "agent": "codex"})
+    result = await mcp.call_tool(
+        "set_task_pr",
+        {
+            "task_id": t.id,
+            "agent": "codex",
+            "pr_url": "https://github.com/x/y/pull/1",
+            "status": "open",
+        },
+    )
+    data = _to_dict(result)
+    flat = (
+        data if isinstance(data, dict) and "pr_url" in data else data.get("result", data)
+    )
+    assert flat["pr_url"] == "https://github.com/x/y/pull/1"
+    assert flat["pr_status"] == "open"
