@@ -1,0 +1,79 @@
+"""SQLModel ORM models matching spec §4.1."""
+from datetime import datetime
+from enum import Enum
+from typing import Any, Optional
+
+from sqlmodel import JSON, Column, Field, SQLModel
+
+
+class TaskStatus(str, Enum):
+    TODO = "todo"
+    READY = "ready"
+    IN_PROGRESS = "in_progress"
+    REVIEW = "review"
+    DONE = "done"
+    BLOCKED = "blocked"
+    CANCELLED = "cancelled"
+
+
+class ProgressKind(str, Enum):
+    TEXT = "text"
+    DIFF = "diff"
+    ARTIFACT_REF = "artifact_ref"
+    ERROR = "error"
+    STATUS_CHANGE = "status_change"
+
+
+class Project(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    repo_path: Optional[str] = None
+    default_branch: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class Task(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    project_id: Optional[int] = Field(default=None, foreign_key="project.id")
+    title: str
+    description: str = ""
+    status: TaskStatus = Field(default=TaskStatus.TODO, index=True)
+    tags: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    claimed_by: Optional[str] = Field(default=None, index=True)
+    claimed_at: Optional[datetime] = None
+    sort_order: float = Field(default=0.0)
+    # Phase 3 fields (present now so migrations are stable; unused in Phase 1)
+    repo_path: Optional[str] = None
+    base_branch: Optional[str] = None
+    branch: Optional[str] = None
+    pr_url: Optional[str] = None
+    pr_status: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ProgressEvent(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    task_id: int = Field(foreign_key="task.id", index=True)
+    agent: str
+    kind: ProgressKind
+    payload: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+class Comment(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    task_id: int = Field(foreign_key="task.id", index=True)
+    author: str
+    content: str
+    seen_by_agent: bool = False
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+class Artifact(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    task_id: int = Field(foreign_key="task.id", index=True)
+    path: str
+    kind: str
+    description: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)

@@ -7,6 +7,7 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "sqlmodel>=0.0.22",
+    "greenlet>=3.1",                  # required by sqlalchemy's async engine
     "asyncpg>=0.30",
     "alembic>=1.14",
     "psycopg2-binary>=2.9",          # for alembic sync operations
