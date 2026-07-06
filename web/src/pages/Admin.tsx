@@ -12,6 +12,7 @@ export function Admin({ onBack }: { onBack: () => void }) {
   const [mintedToken, setMintedToken] = useState<string | null>(null);
   const [newUser, setNewUser] = useState({ username: "", password: "", is_admin: false });
   const [actionError, setActionError] = useState<string | null>(null);
+  const [editingUserId, setEditingUserId] = useState<number | null>(null);
 
   async function refresh() {
     setTokens(await api.listTokens());
@@ -55,6 +56,7 @@ export function Admin({ onBack }: { onBack: () => void }) {
     setActionError(null);
     try {
       await api.deleteUser(id);
+      if (editingUserId === id) setEditingUserId(null);
       refresh();
     } catch (e) {
       setActionError(e instanceof Error ? e.message : "Failed to remove user");
@@ -108,14 +110,126 @@ export function Admin({ onBack }: { onBack: () => void }) {
         <thead><tr><th align="left">username</th><th align="left">admin</th><th align="left">created</th><th></th></tr></thead>
         <tbody>
           {users.map((u) => (
-            <tr key={u.id}>
-              <td>{u.username}</td><td>{u.is_admin ? "✓" : ""}</td>
-              <td>{new Date(u.created_at).toLocaleString()}</td>
-              <td><button onClick={() => removeUser(u.id)}>delete</button></td>
-            </tr>
+            <UserRowView
+              key={u.id}
+              user={u}
+              editing={editingUserId === u.id}
+              onToggleEdit={() => setEditingUserId(editingUserId === u.id ? null : u.id)}
+              onSaved={() => { setEditingUserId(null); refresh(); }}
+              onError={(msg) => setActionError(msg)}
+              onDelete={() => removeUser(u.id)}
+            />
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+function UserRowView({
+  user,
+  editing,
+  onToggleEdit,
+  onSaved,
+  onError,
+  onDelete,
+}: {
+  user: UserRow;
+  editing: boolean;
+  onToggleEdit: () => void;
+  onSaved: () => void;
+  onError: (msg: string) => void;
+  onDelete: () => void;
+}) {
+  // Password change fields. current_password is the ACTING admin's password
+  // (re-proving identity), password is the target user's new password.
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function changePassword() {
+    if (!currentPassword || !newPassword) return;
+    setBusy(true);
+    try {
+      await api.updateUser(user.id, { current_password: currentPassword, password: newPassword });
+      setCurrentPassword("");
+      setNewPassword("");
+      onSaved();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to change password");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleAdmin(next: boolean) {
+    setBusy(true);
+    try {
+      await api.updateUser(user.id, { is_admin: next });
+      onSaved();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to update admin flag");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <tr>
+        <td>{user.username}</td>
+        <td>
+          <label>
+            <input
+              type="checkbox"
+              checked={user.is_admin}
+              disabled={busy || user.is_admin === true}
+              onChange={(e) => toggleAdmin(e.target.checked)}
+              title={user.is_admin ? "uncheck via edit to demote" : "promote to admin"}
+            />{" "}
+            {user.is_admin ? "✓ admin" : ""}
+          </label>
+        </td>
+        <td>{new Date(user.created_at).toLocaleString()}</td>
+        <td>
+          <button onClick={onToggleEdit}>{editing ? "close" : "edit"}</button>
+        </td>
+      </tr>
+      {editing && (
+        <tr>
+          <td colSpan={4} style={{ background: "#fafafa", padding: 8 }}>
+            <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>
+              Change password — enter <strong>your</strong> current admin password and a new password (8+) for {user.username}.
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <input
+                type="password"
+                placeholder="your current password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                style={{ width: 200 }}
+              />
+              <input
+                type="password"
+                placeholder={`new password for ${user.username}`}
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                style={{ width: 200 }}
+              />
+              <button onClick={changePassword} disabled={busy || !currentPassword || !newPassword}>
+                Change password
+              </button>
+              {!user.is_admin && (
+                <button onClick={() => toggleAdmin(true)} disabled={busy}>promote to admin</button>
+              )}
+              {user.is_admin && (
+                <button onClick={() => toggleAdmin(false)} disabled={busy}>demote</button>
+              )}
+              <button onClick={onDelete} disabled={busy}>delete user</button>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }

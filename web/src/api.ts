@@ -121,6 +121,28 @@ export const api = {
   async deleteUser(id: number): Promise<void> {
     await fetch(`${BASE}/users/${id}`, { method: "DELETE", credentials: "include" });
   },
+  async fetchWsTicket(): Promise<{ ticket: string; expires_in: number }> {
+    return j(await fetch(`${BASE}/ws-ticket`, { method: "POST", credentials: "include" }));
+  },
+  async setup(username: string, password: string): Promise<void> {
+    await fetch(`${BASE}/setup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ username, password }),
+    });
+  },
+  async updateUser(
+    id: number,
+    patch: { current_password?: string; password?: string; is_admin?: boolean }
+  ): Promise<{ id: number; username: string; is_admin: boolean }> {
+    return j(await fetch(`${BASE}/users/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(patch),
+    }));
+  },
 };
 
 export interface WSOptions {
@@ -132,28 +154,34 @@ export interface WSSubscription {
   close: () => void;
 }
 
-export function subscribeWebSocket(
+export async function subscribeWebSocket(
   taskId: number | null,
   onMessage: (evt: { type: string; [k: string]: unknown }) => void,
   options: WSOptions = {}
-): WSSubscription {
+): Promise<WSSubscription> {
   const maxRetries = options.maxRetries ?? 5;
   const baseDelayMs = options.baseDelayMs ?? 500;
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  // Optional bearer from localStorage (for cross-origin where the session
-  // cookie doesn't flow). Same-origin cookie works without it.
-  const bearer = window.localStorage.getItem("kanban_bearer");
-  const qParts = taskId ? [`task_id=${taskId}`] : [];
-  if (bearer) qParts.push(`token=${encodeURIComponent(bearer)}`);
-  const q = qParts.length ? `?${qParts.join("&")}` : "";
-  const url = `${proto}//${location.host}/ws${q}`;
 
   let retryCount = 0;
   let closedByCaller = false;
   let ws: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-  function open() {
+  async function open() {
+    // Fetch a fresh single-use ticket each time we (re)connect. The ticket
+    // keeps the long-lived bearer out of proxy/access logs (the WS URL is
+    // logged); the session cookie remains the primary auth for same-origin.
+    const qParts: string[] = [];
+    if (taskId) qParts.push(`task_id=${taskId}`);
+    try {
+      const { ticket } = await api.fetchWsTicket();
+      qParts.push(`ticket=${encodeURIComponent(ticket)}`);
+    } catch {
+      // Cookie-only fallback (same-origin). Continue without ticket.
+    }
+    const q = qParts.length ? `?${qParts.join("&")}` : "";
+    const url = `${proto}//${location.host}/ws${q}`;
     ws = new WebSocket(url);
     ws.onopen = () => {
       retryCount = 0;
@@ -180,7 +208,7 @@ export function subscribeWebSocket(
     };
   }
 
-  open();
+  await open();
 
   return {
     close: () => {
