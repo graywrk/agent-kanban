@@ -125,12 +125,12 @@ export const api = {
     return j(await fetch(`${BASE}/ws-ticket`, { method: "POST", credentials: "include" }));
   },
   async setup(username: string, password: string): Promise<void> {
-    await fetch(`${BASE}/setup`, {
+    await j(await fetch(`${BASE}/setup`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
       body: JSON.stringify({ username, password }),
-    });
+    }));
   },
   async updateUser(
     id: number,
