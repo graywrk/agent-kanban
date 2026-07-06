@@ -65,22 +65,52 @@ async def db_url(test_db_name, monkeypatch):
     yield url
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def _dispose_engines():
+    """Dispose any cached `agent_kanban.db` engines between tests.
+
+    pytest-asyncio (auto mode) runs each test on a fresh event loop; asyncpg
+    connections bind to the loop active when first checked out. Each test's
+    throwaway DB gets its own engine (keyed on its unique DATABASE_URL), and we
+    dispose every cached engine afterward so connections never outlive their loop.
+    """
+    yield
+    from agent_kanban import db as _db
+
+    while _db._engines:
+        _, engine = _db._engines.popitem()
+        await engine.dispose()
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _clean_tables(db_url):
+    """Truncate all tables before each test.
+
+    Every test shares one session-scoped throwaway DB (see `test_db_name`), so
+    without truncation rows leak between tests and ordering-sensitive queries
+    (e.g. list_tasks, get_next_task over READY rows) become non-deterministic.
+    autouse so REST/WS route tests that never touch the `session` fixture still
+    start from a clean slate.
+    """
+    engine = create_async_engine(db_url)
+    try:
+        async with engine.begin() as conn:
+            from sqlalchemy import text
+
+            await conn.execute(
+                text(
+                    "TRUNCATE TABLE project, task, progressevent, comment, artifact "
+                    "RESTART IDENTITY CASCADE"
+                )
+            )
+    finally:
+        await engine.dispose()
+
+
 @pytest_asyncio.fixture
 async def session(db_url):
     engine = create_async_engine(db_url)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with factory() as s:
         yield s
-    # Isolate tests: every test shares one DB, so truncate all tables between
-    # tests. Without this, ordering-sensitive queries (e.g. get_next_task over
-    # READY rows) become non-deterministic across the suite.
-    async with engine.begin() as conn:
-        from sqlalchemy import text
-
-        await conn.execute(
-            text(
-                "TRUNCATE TABLE project, task, progressevent, comment, artifact "
-                "RESTART IDENTITY CASCADE"
-            )
-        )
     await engine.dispose()

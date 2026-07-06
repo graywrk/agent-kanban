@@ -2,9 +2,20 @@
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from agent_kanban.models import ProgressKind, TaskStatus
+
+
+class ReadBase(BaseModel):
+    """Base for response models built from ORM objects.
+
+    Routes return ORM instances and let FastAPI serialize via
+    `response_model=...Read`; that path calls `model_validate(orm_obj)`,
+    which requires `from_attributes=True`.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ---- Project ----
@@ -14,7 +25,7 @@ class ProjectCreate(BaseModel):
     default_branch: Optional[str] = None
 
 
-class ProjectRead(BaseModel):
+class ProjectRead(ReadBase):
     id: int
     name: str
     repo_path: Optional[str] = None
@@ -41,7 +52,7 @@ class TaskUpdate(BaseModel):
     project_id: Optional[int] = None
 
 
-class TaskRead(BaseModel):
+class TaskRead(ReadBase):
     id: int
     project_id: Optional[int] = None
     title: str
@@ -69,7 +80,7 @@ class ProgressCreate(BaseModel):
     status: Optional[dict[str, Any]] = None  # {from, to, note}
 
 
-class ProgressRead(BaseModel):
+class ProgressRead(ReadBase):
     id: int
     task_id: int
     agent: str
@@ -84,7 +95,7 @@ class CommentCreate(BaseModel):
     content: str
 
 
-class CommentRead(BaseModel):
+class CommentRead(ReadBase):
     id: int
     task_id: int
     author: str
@@ -101,7 +112,7 @@ class ArtifactCreate(BaseModel):
     description: Optional[str] = None
 
 
-class ArtifactRead(BaseModel):
+class ArtifactRead(ReadBase):
     id: int
     task_id: int
     path: str
