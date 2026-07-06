@@ -41,12 +41,19 @@ class SetupBody(BaseModel):
 @router.post("/setup", status_code=201)
 async def setup(body: SetupBody, session: AsyncSession = Depends(get_session)):
     """Create the first admin user. Only valid when no users exist (needs_setup)."""
+    if not body.username.strip():
+        raise HTTPException(400, "username must not be empty")
+    if len(body.password) < 8:
+        raise HTTPException(400, "password must be at least 8 characters")
+    # Serialize setup: an advisory lock prevents two concurrent setups from both
+    # observing count==0 and both inserting. The lock key is arbitrary but stable.
+    # 7331001 is a port-derived constant; it has no meaning beyond being stable.
+    from sqlalchemy import text
+    await session.execute(text("SELECT pg_advisory_xact_lock(7331001)"))
     existing = (await session.execute(select(func.count(User.id)))).scalar_one()
     if existing > 0:
         raise HTTPException(409, "setup already complete — users exist")
-    if len(body.password) < 8:
-        raise HTTPException(400, "password must be at least 8 characters")
-    u = User(username=body.username, password_hash=hash_password(body.password), is_admin=True)
+    u = User(username=body.username.strip(), password_hash=hash_password(body.password), is_admin=True)
     session.add(u)
     await session.commit()
     await session.refresh(u)

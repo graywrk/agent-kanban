@@ -236,6 +236,12 @@ async def test_setup_rejected_after_users_exist(client):
 
 
 @pytest.mark.asyncio
+async def test_setup_rejects_empty_username(client):
+    r = await client.post("/api/setup", json={"username": "  ", "password": "longenough"})
+    assert r.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_patch_user_changes_password(client):
     from agent_kanban.db import AsyncSessionLocal
     from agent_kanban.models import User
