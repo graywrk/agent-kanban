@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from agent_kanban.config import get_settings
 from agent_kanban.mcp_server import create_mcp
-from agent_kanban.routes import comments, progress, projects, tasks, ws
+from agent_kanban.routes import artifacts, comments, progress, projects, tasks, ws
 
 
 def create_app() -> FastAPI:
@@ -41,6 +41,7 @@ def create_app() -> FastAPI:
     app.include_router(tasks.router)
     app.include_router(progress.router)
     app.include_router(comments.router)
+    app.include_router(artifacts.router)
     app.include_router(ws.router)
 
     # Mount MCP HTTP transport at /mcp. With FastMCP's streamable_http_path="/",

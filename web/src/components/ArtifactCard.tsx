@@ -19,22 +19,24 @@ export function ArtifactCard({
 }) {
   const [size, setSize] = useState<string | null>(null);
   const isImage = IMAGE_KINDS.has(artifact.kind.toLowerCase());
+  const contentUrl = artifact.id
+    ? `/api/artifacts/${artifact.id}/content`
+    : null;
 
   useEffect(() => {
-    // Best-effort size fetch; ignore failures (path may not be HTTP-served).
-    if (isImage) return;
-    fetch(`file:///${artifact.path}`, { method: "HEAD" })
+    if (!contentUrl) return;
+    fetch(contentUrl, { method: "HEAD" })
       .then((r) => {
         const len = r.headers.get("content-length");
         if (len) setSize(formatBytes(Number(len)));
       })
       .catch(() => {});
-  }, [artifact.path, isImage]);
+  }, [contentUrl]);
 
   return (
     <a
-      href={`file:///${artifact.path}`}
-      onClick={(e) => e.preventDefault()}
+      href={contentUrl ?? `file:///${artifact.path}`}
+      onClick={contentUrl ? undefined : (e) => e.preventDefault()}
       title={artifact.path}
       style={{
         display: "flex",
@@ -48,12 +50,12 @@ export function ArtifactCard({
         alignItems: "center",
       }}
     >
-      {isImage ? (
+      {isImage && contentUrl ? (
         <img
-          src={`file:///${artifact.path}`}
+          src={contentUrl}
           alt={description ?? artifact.path}
           style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 4 }}
-          onError={(e) => { (e.currentTarget.style.display = "none"); }}
+          onError={(e) => { e.currentTarget.style.display = "none"; }}
         />
       ) : (
         <span style={{ fontSize: 24 }}>{iconFor(artifact.kind)}</span>

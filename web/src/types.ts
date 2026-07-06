@@ -43,6 +43,7 @@ export interface ProgressEvent {
 }
 
 export interface ArtifactMeta {
+  id?: number;
   path: string;
   kind: string; // "screenshot" | "log" | "diff.patch" | "file" | ...
 }
