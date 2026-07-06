@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: kanban
+      POSTGRES_PASSWORD: kanban
+      POSTGRES_DB: kanban
+    volumes:
+      - ak_pgdata:/var/lib/postgresql/data
+    # Postgres is NOT exposed to the host: the app container connects to it
+    # over the internal compose network as `postgres:5432`. This avoids host
+    # port conflicts (the host already runs Postgres on 5432) and matches the
+    # production-correct setup where the DB doesn't need to be host-visible.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kanban"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://kanban:kanban@postgres:5432/kanban
+      PORT: "7331"
+    ports:
+      - "7331:7331"
+
+volumes:
+  ak_pgdata:

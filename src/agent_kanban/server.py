@@ -1,8 +1,10 @@
 """FastAPI app factory."""
 import contextlib
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from agent_kanban.config import get_settings
 from agent_kanban.mcp_server import create_mcp
@@ -44,5 +46,13 @@ def create_app() -> FastAPI:
     # Mount MCP HTTP transport at /mcp. With FastMCP's streamable_http_path="/",
     # the canonical endpoint is /mcp/ (and /mcp 307-redirects to it).
     app.mount("/mcp", mcp_http_app)
+
+    # Serve the built React frontend (if present) as a catch-all at "/".
+    # Mounted LAST so it never shadows /api, /ws, or /mcp. In dev the Vite dev
+    # server (web/) serves the SPA instead; in Docker the build is copied to
+    # $AGENT_KANBAN_STATIC_DIR (default web/dist relative to CWD).
+    static_dir = os.environ.get("AGENT_KANBAN_STATIC_DIR", "web/dist")
+    if os.path.isdir(static_dir):
+        app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
     return app
