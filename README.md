@@ -108,7 +108,7 @@ The board requires authentication. Two kinds of principals:
 
 ### First run
 
-On first startup with an empty database, the board auto-creates an `admin` user and prints a random password to stdout once. Set `AGENT_KANBAN_BOOTSTRAP_ADMIN_PASSWORD` to choose it yourself. Log in, then go to Admin → Users to add more users, and Admin → Tokens to mint tokens for your agents.
+On first startup with an empty database, the UI shows a setup screen: choose an admin username + password (8+ chars) and submit. Alternatively, set `AGENT_KANBAN_BOOTSTRAP_ADMIN_PASSWORD` to create the admin headlessly (for automation). After setup, log in and go to Admin → Tokens to mint tokens for your agents.
 
 ### Pointing an agent at the board
 
@@ -137,7 +137,7 @@ The token's `agent_name` MUST match the `agent` argument you pass to MCP tools. 
 
 - `SESSION_SECRET` — signing key for session cookies. REQUIRED in production; set a long random string.
 - `PUBLIC_URL` — the public base URL (e.g. `https://kanban.example.com`). Controls cookie `Secure` flag.
-- `AGENT_KANBAN_BOOTSTRAP_ADMIN_PASSWORD` — first-run admin password (optional; auto-generated if unset).
+- `AGENT_KANBAN_BOOTSTRAP_ADMIN_PASSWORD` — first-run admin password (optional; if unset, the UI setup screen creates the first admin).
 
 ## Docker
 ```bash

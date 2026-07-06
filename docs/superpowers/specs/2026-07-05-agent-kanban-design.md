@@ -242,11 +242,24 @@ set_task_pr(task_id: str, agent: str, pr_url: str, status: "open" | "merged" | "
 # Updates tasks.pr_url and tasks.pr_status. Requires claimed_by == agent.
 ```
 
-### 5.3 Authorization model
+### 5.3 Authorization model (updated Phase 4)
 
-- Single-user, no auth. The `agent` string passed to `claim_task` is used as a lightweight authorization for subsequent mutations: the board checks `tasks.claimed_by == calling_agent` before allowing `post_progress`, `complete_task`, `request_review`, `set_task_branch`, `set_task_pr`.
-- Read tools (`get_next_task`, `list_tasks`, `get_comments`) are unrestricted.
-- If multi-user is added later, a bearer token will gate the MCP endpoint; the per-agent authorization remains.
+The board supports two principal kinds:
+
+- **Users** (humans): authenticate with username + password (bcrypt-hashed, cost 12). Sessions are signed HttpOnly cookies (`kanban_session`, SameSite=Lax, Secure when `PUBLIC_URL` is https).
+- **Tokens** (agents): opaque bearer tokens (`secrets.token_urlsafe(32)`), bcrypt-hashed at rest, shown once at creation. Each token is bound to an `agent_name`.
+
+Every REST route, the WebSocket, and every MCP tool requires a resolved `Principal`. Mutation MCP tools additionally verify that the `agent` argument equals the calling token's `agent_name`; mismatch raises `PermissionError` (surfaced as a tool error to the agent). Read MCP tools require any valid principal.
+
+`SESSION_SECRET` (the cookie-signing key) is required in production: the docker-compose file fails loudly if unset, and the server refuses to start with a known-insecure default when `PUBLIC_URL` is https. First-run setup is via `POST /api/setup` (creates the first admin) when no users exist; the `AGENT_KANBAN_BOOTSTRAP_ADMIN_PASSWORD` env var is an alternative for headless automation.
+
+### 5.4 WebSocket tickets
+
+Browsers cannot set `Authorization` headers on WebSocket connections, so the bearer cannot flow as a header for cross-origin WS. The board issues single-use, 60-second WS tickets: `POST /api/ws-ticket` (cookie/bearer authed) → `{ticket, expires_in}`. The frontend connects the socket with `?ticket=<nonce>`. The nonce is consumed on use, so it never leaks the long-lived bearer into proxy/access logs. The session cookie remains the primary WS auth for same-origin deployments.
+
+### 5.5 Token prefix index
+
+Token lookup filters by the first 8 characters of the plaintext (`token_prefix`, indexed) before bcrypt-verifying, reducing the per-request cost from O(N) bcrypt checks to one index lookup + one bcrypt check. Legacy tokens (minted before Phase 5) have an empty prefix and fall back to a full scan.
 
 ---
 
