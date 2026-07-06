@@ -47,9 +47,15 @@ export const api = {
   async listComments(taskId: number): Promise<Comment[]> {
     return j(await fetch(`${BASE}/tasks/${taskId}/comments`));
   },
-  async postComment(taskId: number, content: string, author = "user"): Promise<Comment> {
+  async postComment(
+    taskId: number,
+    content: string,
+    author = "user",
+    status?: "in_progress" | "ready"
+  ): Promise<Comment> {
+    const q = status ? `?status=${status}` : "";
     return j(
-      await fetch(`${BASE}/tasks/${taskId}/comments`, {
+      await fetch(`${BASE}/tasks/${taskId}/comments${q}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ author, content }),

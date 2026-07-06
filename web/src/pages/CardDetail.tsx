@@ -8,6 +8,7 @@ export function CardDetail({ taskId, onBack }: { taskId: number; onBack: () => v
   const [task, setTask] = useState<Task | null>(null);
   const [progress, setProgress] = useState<ProgressEvent[]>([]);
   const [comments, setComments] = useState<Comment[]>([]);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   async function refresh() {
     setTask(await api.getTask(taskId));
@@ -36,7 +37,7 @@ export function CardDetail({ taskId, onBack }: { taskId: number; onBack: () => v
         <div>
           <h4>Progress</h4>
           <ProgressFeed events={progress} />
-          <CommentList taskId={taskId} comments={comments} onPosted={refresh} />
+          <CommentList taskId={taskId} comments={comments} taskStatus={task.status} onPosted={refresh} />
         </div>
         <div>
           <h4>Details</h4>
@@ -44,10 +45,33 @@ export function CardDetail({ taskId, onBack }: { taskId: number; onBack: () => v
             {task.description || <em>No description</em>}
           </div>
           <div style={{ marginTop: 12 }}>
-            <button onClick={() => api.updateTask(taskId, { status: "ready" }).then(refresh)}>
+            {actionError && (
+              <div style={{ color: "#dc2626", fontSize: 12, marginBottom: 8 }}>{actionError}</div>
+            )}
+            <button
+              onClick={async () => {
+                setActionError(null);
+                try {
+                  await api.updateTask(taskId, { status: "ready" });
+                  refresh();
+                } catch (e) {
+                  setActionError(e instanceof Error ? e.message : "Failed to update task");
+                }
+              }}
+            >
               Reopen → ready
             </button>{" "}
-            <button onClick={() => api.updateTask(taskId, { status: "cancelled" }).then(refresh)}>
+            <button
+              onClick={async () => {
+                setActionError(null);
+                try {
+                  await api.updateTask(taskId, { status: "cancelled" });
+                  refresh();
+                } catch (e) {
+                  setActionError(e instanceof Error ? e.message : "Failed to update task");
+                }
+              }}
+            >
               Cancel
             </button>
           </div>
