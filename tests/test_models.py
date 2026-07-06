@@ -1,5 +1,6 @@
 """Smoke tests that models persist correctly."""
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlmodel import SQLModel, select
 
@@ -46,4 +47,20 @@ async def test_progress_event_with_jsonb_payload(db_url):
 
         assert ev.payload == {"content": "starting work"}
         assert ev.created_at is not None
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_status_stored_as_lowercase_value(db_url):
+    """Spec §4.1: statuses are lowercase. Raw SQL with 'ready' must work."""
+    engine = create_async_engine(db_url)
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "INSERT INTO task (title, status, tags, sort_order, description, created_at, updated_at) "
+            "VALUES ('rawsql', 'ready', '[]', 0, '', NOW(), NOW())"
+        ))
+    async with AsyncSession(engine) as session:
+        result = await session.execute(select(Task).where(Task.status == TaskStatus.READY))
+        task = result.scalar_one()
+        assert task.title == 'rawsql'
     await engine.dispose()

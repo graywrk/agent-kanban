@@ -3,6 +3,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Optional
 
+from sqlalchemy import Enum as SAEnum
 from sqlmodel import JSON, Column, Field, SQLModel
 
 
@@ -37,7 +38,17 @@ class Task(SQLModel, table=True):
     project_id: Optional[int] = Field(default=None, foreign_key="project.id")
     title: str
     description: str = ""
-    status: TaskStatus = Field(default=TaskStatus.TODO, index=True)
+    status: TaskStatus = Field(
+        default=TaskStatus.TODO,
+        sa_column=Column(
+            SAEnum(
+                TaskStatus,
+                name="taskstatus",
+                values_callable=lambda e: [m.value for m in e],
+            ),
+            index=True,
+        ),
+    )
     tags: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     claimed_by: Optional[str] = Field(default=None, index=True)
     claimed_at: Optional[datetime] = None
@@ -56,7 +67,15 @@ class ProgressEvent(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     task_id: int = Field(foreign_key="task.id", index=True)
     agent: str
-    kind: ProgressKind
+    kind: ProgressKind = Field(
+        sa_column=Column(
+            SAEnum(
+                ProgressKind,
+                name="progresskind",
+                values_callable=lambda e: [m.value for m in e],
+            )
+        )
+    )
     payload: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 

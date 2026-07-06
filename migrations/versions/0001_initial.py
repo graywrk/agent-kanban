@@ -26,11 +26,11 @@ def upgrade() -> None:
     # round-trip upgrade/downgrade/upgrade works (table-drop does not drop the
     # enum type, and CREATE TABLE would otherwise try to re-create it).
     task_status_enum = postgresql.ENUM(
-        'TODO', 'READY', 'IN_PROGRESS', 'REVIEW', 'DONE', 'BLOCKED', 'CANCELLED',
+        'todo', 'ready', 'in_progress', 'review', 'done', 'blocked', 'cancelled',
         name='taskstatus', create_type=False,
     )
     progress_kind_enum = postgresql.ENUM(
-        'TEXT', 'DIFF', 'ARTIFACT_REF', 'ERROR', 'STATUS_CHANGE',
+        'text', 'diff', 'artifact_ref', 'error', 'status_change',
         name='progresskind', create_type=False,
     )
     task_status_enum.create(op.get_bind(), checkfirst=True)
