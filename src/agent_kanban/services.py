@@ -256,9 +256,9 @@ async def _maybe_collect_review_diff(
     base = await resolve_base_branch(session, task)
     if base is None:
         return
+    # Collect the unified diff — failure here means we can't render anything.
     try:
         diff_text = await collect_diff(task.repo_path, base, task.branch)
-        diffstats = await collect_diffstats(task.repo_path, base, task.branch)
     except GitError as exc:
         session.add(
             ProgressEvent(
@@ -279,6 +279,13 @@ async def _maybe_collect_review_diff(
             )
         )
         return
+
+    # Collect per-file stats — failure here degrades to empty stats, not a lost diff.
+    try:
+        diffstats = await collect_diffstats(task.repo_path, base, task.branch)
+    except Exception:
+        diffstats = []
+
     files = [s["path"] for s in diffstats]
     stats = {
         s["path"]: (
