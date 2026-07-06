@@ -4,6 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agent_kanban.auth import Principal, get_current_principal
 from agent_kanban.db import get_session
 from agent_kanban.models import TaskStatus
 from agent_kanban.schemas import TaskCreate, TaskRead, TaskUpdate
@@ -17,18 +18,27 @@ async def get_tasks(
     status: Optional[TaskStatus] = None,
     tags_any: Optional[str] = None,
     session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_current_principal),
 ):
     tags = tags_any.split(",") if tags_any else None
     return await list_tasks(session, status, tags)
 
 
 @router.post("", response_model=TaskRead, status_code=201)
-async def post_task(data: TaskCreate, session: AsyncSession = Depends(get_session)):
+async def post_task(
+    data: TaskCreate,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_current_principal),
+):
     return await create_task(session, data)
 
 
 @router.get("/{task_id}", response_model=TaskRead)
-async def get_one(task_id: int, session: AsyncSession = Depends(get_session)):
+async def get_one(
+    task_id: int,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_current_principal),
+):
     try:
         return await get_task(session, task_id)
     except ValueError:
@@ -37,7 +47,10 @@ async def get_one(task_id: int, session: AsyncSession = Depends(get_session)):
 
 @router.patch("/{task_id}", response_model=TaskRead)
 async def patch_task(
-    task_id: int, data: TaskUpdate, session: AsyncSession = Depends(get_session)
+    task_id: int,
+    data: TaskUpdate,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_current_principal),
 ):
     try:
         return await update_task(session, task_id, data)

@@ -12,6 +12,7 @@ import uuid
 import asyncpg
 import pytest
 import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 TEST_DB_TEMPLATE = "postgresql://kanban:kanban@localhost:5436/postgres"
@@ -115,3 +116,22 @@ async def session(db_url):
     async with factory() as s:
         yield s
     await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def authed_client(db_url):
+    """An httpx AsyncClient with a logged-in admin session."""
+    from agent_kanban.config import get_settings
+    get_settings.cache_clear()
+    from agent_kanban.server import create_app
+    from agent_kanban.db import AsyncSessionLocal
+    from agent_kanban.models import User
+    from agent_kanban.auth import hash_password
+    async with AsyncSessionLocal() as session:
+        session.add(User(username="admin", password_hash=hash_password("pw"), is_admin=True))
+        await session.commit()
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        await c.post("/api/login", json={"username": "admin", "password": "pw"})
+        yield c

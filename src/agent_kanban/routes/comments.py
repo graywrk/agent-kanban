@@ -4,6 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agent_kanban.auth import Principal, get_current_principal
 from agent_kanban.db import get_session
 from agent_kanban.models import TaskStatus
 from agent_kanban.schemas import CommentCreate, CommentRead
@@ -17,6 +18,7 @@ async def get_comments(
     task_id: int,
     since_id: Optional[int] = None,
     session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_current_principal),
 ):
     # UI doesn't mark comments seen (only agents do via MCP).
     return await list_comments(session, task_id, since_id, mark_seen_by=None)
@@ -30,6 +32,7 @@ async def add_comment(
         None, description="Override task status after comment. If omitted, review→in_progress."
     ),
     session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_current_principal),
 ):
     if data.author == "":
         data.author = "user"

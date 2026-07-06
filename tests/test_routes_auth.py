@@ -108,10 +108,5 @@ async def test_token_authenticates_bearer(client):
 
 @pytest.mark.asyncio
 async def test_protected_route_401_without_creds(client):
-    # /api/tasks now requires a principal (Task 4 enforces this; this test
-    # exists in Task 3 to document the contract early but will only pass
-    # after Task 4 wires the dep. Skip-style: expect 401 OR 200 — Task 4
-    # tightens to 401. For now, just verify the endpoint exists.)
     r = await client.get("/api/tasks")
-    # Before Task 4: 200. After Task 4: 401. We assert 401 once Task 4 lands.
-    assert r.status_code in (200, 401)
+    assert r.status_code == 401
