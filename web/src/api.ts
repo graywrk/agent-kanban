@@ -44,6 +44,9 @@ export const api = {
   async listProgress(taskId: number): Promise<ProgressEvent[]> {
     return j(await fetch(`${BASE}/tasks/${taskId}/progress`));
   },
+  async listLastProgressTimestamps(): Promise<Record<number, string>> {
+    return j(await fetch(`${BASE}/progress/last`));
+  },
   async listComments(taskId: number): Promise<Comment[]> {
     return j(await fetch(`${BASE}/tasks/${taskId}/comments`));
   },
