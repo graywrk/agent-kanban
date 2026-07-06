@@ -51,7 +51,7 @@ def upgrade() -> None:
     sa.Column('title', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('description', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('status', task_status_enum, nullable=False),
-    sa.Column('tags', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('tags', postgresql.JSONB(astext_type=sa.Text()), server_default="[]", nullable=False),
     sa.Column('claimed_by', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
     sa.Column('claimed_at', sa.DateTime(), nullable=True),
     sa.Column('sort_order', sa.Float(), nullable=False),

@@ -1,5 +1,5 @@
 """REST routes for progress events (read-only in the UI)."""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 

@@ -9,7 +9,6 @@ import os
 import sys
 
 from mcp.client.session import ClientSession
-from mcp.client.stdio import StdioServerParameters
 from mcp.client.streamable_http import streamablehttp_client
 
 

@@ -14,13 +14,12 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 @router.get("", response_model=list[TaskRead])
 async def get_tasks(
-    status: Optional[str] = None,
+    status: Optional[TaskStatus] = None,
     tags_any: Optional[str] = None,
     session: AsyncSession = Depends(get_session),
 ):
-    status_enum = TaskStatus(status) if status else None
     tags = tags_any.split(",") if tags_any else None
-    return await list_tasks(session, status_enum, tags)
+    return await list_tasks(session, status, tags)
 
 
 @router.post("", response_model=TaskRead, status_code=201)

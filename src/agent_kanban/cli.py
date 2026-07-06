@@ -1,6 +1,5 @@
 """`kanban` CLI entry point."""
 import argparse
-import sys
 
 import uvicorn
 

@@ -55,3 +55,17 @@ async def test_get_task_by_id(client):
 async def test_get_task_404(client):
     r = await client.get("/api/tasks/9999")
     assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_invalid_status_returns_422(client):
+    r = await client.get("/api/tasks?status=bogus")
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_filter_by_status(client):
+    await client.post("/api/tasks", json={"title": "t1"})
+    r = await client.get("/api/tasks?status=ready")
+    assert r.status_code == 200
+    assert r.json() == []
