@@ -1,12 +1,13 @@
 """REST routes for comments."""
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_kanban.db import get_session
-from agent_kanban.schemas import CommentCreate, CommentRead
-from agent_kanban.services import list_comments, post_comment
+from agent_kanban.models import TaskStatus
+from agent_kanban.schemas import CommentCreate, CommentRead, TaskUpdate
+from agent_kanban.services import get_task, list_comments, post_comment, update_task
 
 router = APIRouter(prefix="/api/tasks/{task_id}/comments", tags=["comments"])
 
@@ -25,9 +26,23 @@ async def get_comments(
 async def add_comment(
     task_id: int,
     data: CommentCreate,
+    status: Optional[str] = Query(
+        None, description="Override task status after comment. If omitted, review→in_progress."
+    ),
     session: AsyncSession = Depends(get_session),
 ):
     # UI posts as author "user" unless specified.
     if data.author == "":
         data.author = "user"
-    return await post_comment(session, task_id, data.author, data.content)
+    comment = await post_comment(session, task_id, data.author, data.content)
+
+    # Resolve the target status: explicit query param wins; else auto review→in_progress.
+    if status is not None:
+        target = TaskStatus(status)
+    else:
+        task = await get_task(session, task_id)
+        target = TaskStatus.IN_PROGRESS if task.status == TaskStatus.REVIEW else None
+
+    if target is not None:
+        await update_task(session, task_id, TaskUpdate(status=target))
+    return comment
