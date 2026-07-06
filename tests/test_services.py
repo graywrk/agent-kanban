@@ -1,0 +1,158 @@
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from agent_kanban.models import TaskStatus
+from agent_kanban.schemas import ArtifactCreate, ProgressCreate, TaskCreate
+from agent_kanban.services import (
+    claim_task,
+    complete_task,
+    create_task,
+    get_next_task,
+    post_artifact,
+    post_progress,
+    request_review,
+    update_task,
+)
+from agent_kanban.models import ProgressKind
+
+
+@pytest.mark.asyncio
+async def test_create_task_defaults_to_todo(session: AsyncSession):
+    t = await create_task(session, TaskCreate(title="hi"))
+    assert t.status == TaskStatus.TODO
+    assert t.tags == []
+
+
+@pytest.mark.asyncio
+async def test_get_next_task_returns_only_ready(session: AsyncSession):
+    a = await create_task(session, TaskCreate(title="a", status=TaskStatus.TODO))
+    b = await create_task(session, TaskCreate(title="b", status=TaskStatus.READY))
+    nxt = await get_next_task(session, None, None, None)
+    assert nxt is not None
+    assert nxt.id == b.id
+
+
+@pytest.mark.asyncio
+async def test_get_next_task_filters_by_tag(session: AsyncSession):
+    await create_task(session, TaskCreate(title="x", status=TaskStatus.READY, tags=["ui"]))
+    await create_task(session, TaskCreate(title="y", status=TaskStatus.READY, tags=["backend"]))
+    nxt = await get_next_task(session, tags_any=["backend"], tags_all=None, exclude_tags=None)
+    assert nxt is not None
+    assert nxt.tags == ["backend"]
+
+
+@pytest.mark.asyncio
+async def test_claim_task_atomic_and_authorizes(session: AsyncSession):
+    t = await create_task(session, TaskCreate(title="t", status=TaskStatus.READY))
+    r1 = await claim_task(session, t.id, "codex")
+    assert r1.ok is True
+    assert r1.task.claimed_by == "codex"
+    assert r1.task.status == TaskStatus.IN_PROGRESS
+
+    # Second claim attempt fails.
+    r2 = await claim_task(session, t.id, "hermes")
+    assert r2.ok is False
+    assert "already" in (r2.reason or "").lower() or "not ready" in (r2.reason or "").lower()
+
+
+@pytest.mark.asyncio
+async def test_post_progress_requires_claimer(session: AsyncSession):
+    t = await create_task(session, TaskCreate(title="t", status=TaskStatus.READY))
+    await claim_task(session, t.id, "codex")
+
+    # Wrong agent rejected.
+    with pytest.raises(PermissionError):
+        await post_progress(
+            session,
+            t.id,
+            ProgressCreate(agent="hermes", kind=ProgressKind.TEXT, content="hi"),
+        )
+
+    # Right agent succeeds.
+    ev = await post_progress(
+        session,
+        t.id,
+        ProgressCreate(agent="codex", kind=ProgressKind.TEXT, content="hi"),
+    )
+    assert ev.payload["content"] == "hi"
+
+
+@pytest.mark.asyncio
+async def test_complete_task_sets_done(session: AsyncSession):
+    t = await create_task(session, TaskCreate(title="t", status=TaskStatus.READY))
+    await claim_task(session, t.id, "codex")
+    done = await complete_task(session, t.id, "codex", summary="all done")
+    assert done.status == TaskStatus.DONE
+
+
+@pytest.mark.asyncio
+async def test_complete_task_rejects_non_claimer(session: AsyncSession):
+    t = await create_task(session, TaskCreate(title="t", status=TaskStatus.READY))
+    await claim_task(session, t.id, "codex")
+    with pytest.raises(PermissionError):
+        await complete_task(session, t.id, "hermes")
+
+
+@pytest.mark.asyncio
+async def test_request_review_sets_review(session: AsyncSession):
+    t = await create_task(session, TaskCreate(title="t", status=TaskStatus.READY))
+    await claim_task(session, t.id, "codex")
+    out = await request_review(session, t.id, "codex", summary="please check")
+    assert out.status == TaskStatus.REVIEW
+
+
+@pytest.mark.asyncio
+async def test_post_artifact_rejects_path_outside_sandbox(session: AsyncSession):
+    t = await create_task(session, TaskCreate(title="t", status=TaskStatus.READY))
+    await claim_task(session, t.id, "codex")
+    with pytest.raises(ValueError):
+        await post_artifact(
+            session,
+            t.id,
+            ArtifactCreate(agent="codex", kind="log", path="/etc/passwd"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_post_progress_blocked_publishes_to_board(session: AsyncSession):
+    """BLOCKED transition must fan out to the board channel, not just task:{id}."""
+    from agent_kanban.events import event_bus
+    import asyncio
+    received = []
+    async def consumer():
+        async for evt in event_bus.subscribe("board"):
+            received.append(evt)
+            break
+    task = await create_task(session, TaskCreate(title="t", status=TaskStatus.READY))
+    await claim_task(session, task.id, "codex")
+    consumer_task = asyncio.create_task(consumer())
+    await asyncio.sleep(0.05)
+    await post_progress(
+        session,
+        task.id,
+        ProgressCreate(
+            agent="codex",
+            kind=ProgressKind.STATUS_CHANGE,
+            content="stuck on env",
+            status={"from": "in_progress", "to": "blocked", "note": "need user input"},
+        ),
+    )
+    await asyncio.wait_for(consumer_task, timeout=1.0)
+    assert any(evt.get("type") == "task_blocked" for evt in received)
+
+
+@pytest.mark.asyncio
+async def test_list_comments_marks_only_other_authors_seen(session: AsyncSession):
+    """get_comments must not mark the calling agent's own comments as seen."""
+    from agent_kanban.services import post_comment, list_comments
+    t = await create_task(session, TaskCreate(title="t", status=TaskStatus.TODO))
+    # codex writes a comment; user writes a comment
+    await post_comment(session, t.id, "codex", "i am working")
+    await post_comment(session, t.id, "user", "good luck")
+    # codex reads comments
+    comments = await list_comments(session, t.id, since_id=None, mark_seen_by="codex")
+    # codex's own comment must remain seen_by_agent=False (it's not a message TO codex)
+    codex_own = [c for c in comments if c.author == "codex"][0]
+    user_to_codex = [c for c in comments if c.author == "user"][0]
+    assert codex_own.seen_by_agent is False
+    assert user_to_codex.seen_by_agent is True
