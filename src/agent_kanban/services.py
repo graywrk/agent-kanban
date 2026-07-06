@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from agent_kanban.events import event_bus
+from agent_kanban.git import GitError, collect_diff, resolve_base_branch
 from agent_kanban.models import (
     Artifact,
     Comment,
@@ -225,6 +226,58 @@ async def complete_task(
     return task
 
 
+async def _maybe_collect_review_diff(
+    session: AsyncSession, task: Task, agent: str
+) -> None:
+    """Best-effort: if the task has repo_path + branch + a resolvable base,
+    collect the diff and store it as a progress_event(kind=diff). On git
+    failure, store a kind=error event so the user sees what went wrong.
+    Never raises — review must succeed regardless of git.
+    """
+    if not task.repo_path or not task.branch:
+        return
+    base = await resolve_base_branch(session, task)
+    if base is None:
+        return
+    try:
+        diff_text = await collect_diff(task.repo_path, base, task.branch)
+    except GitError as exc:
+        session.add(
+            ProgressEvent(
+                task_id=task.id,
+                agent=agent,
+                kind="error",
+                payload={"content": f"diff collection failed: {exc}"},
+            )
+        )
+        return
+    except Exception as exc:  # defensive: never break review on a git surprise
+        session.add(
+            ProgressEvent(
+                task_id=task.id,
+                agent=agent,
+                kind="error",
+                payload={"content": f"diff collection raised {type(exc).__name__}: {exc}"},
+            )
+        )
+        return
+    files = _extract_diff_filenames(diff_text)
+    session.add(
+        ProgressEvent(
+            task_id=task.id,
+            agent=agent,
+            kind="diff",
+            payload={"content": diff_text, "files": files, "stats": {}},
+        )
+    )
+
+
+def _extract_diff_filenames(diff_text: str) -> list[str]:
+    """Pull affected file paths from a unified diff (best-effort)."""
+    import re
+    return list(dict.fromkeys(re.findall(r"^\+\+\+ b/(.+)$", diff_text, flags=re.MULTILINE)))
+
+
 async def request_review(
     session: AsyncSession, task_id: int, agent: str, summary: Optional[str] = None
 ) -> Task:
@@ -241,9 +294,42 @@ async def request_review(
                 payload={"content": summary},
             )
         )
+    # Phase 3: best-effort diff auto-collection.
+    await _maybe_collect_review_diff(session, task, agent)
     await session.commit()
     await session.refresh(task)
     await _publish_task_event("board", "task_review_requested", task)
+    return task
+
+
+async def set_task_branch(
+    session: AsyncSession, task_id: int, agent: str, branch: str
+) -> Task:
+    task = await get_task(session, task_id)
+    _check_claimer(task, agent)
+    task.branch = branch
+    task.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    await session.commit()
+    await session.refresh(task)
+    await _publish_task_event("board", "task_updated", task)
+    return task
+
+
+async def set_task_pr(
+    session: AsyncSession,
+    task_id: int,
+    agent: str,
+    pr_url: str,
+    pr_status: str,
+) -> Task:
+    task = await get_task(session, task_id)
+    _check_claimer(task, agent)
+    task.pr_url = pr_url
+    task.pr_status = pr_status
+    task.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    await session.commit()
+    await session.refresh(task)
+    await _publish_task_event("board", "task_updated", task)
     return task
 
 

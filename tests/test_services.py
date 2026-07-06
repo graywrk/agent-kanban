@@ -156,3 +156,121 @@ async def test_list_comments_marks_only_other_authors_seen(session: AsyncSession
     user_to_codex = [c for c in comments if c.author == "user"][0]
     assert codex_own.seen_by_agent is False
     assert user_to_codex.seen_by_agent is True
+
+
+# ---- Phase 3: set_task_branch / set_task_pr / review diff auto-collection ----
+from unittest.mock import AsyncMock, patch  # noqa: E402
+
+from agent_kanban.git import GitError  # noqa: E402
+from agent_kanban.services import (  # noqa: E402
+    get_task,
+    set_task_branch,
+    set_task_pr,
+)
+
+
+@pytest.mark.asyncio
+async def test_set_task_branch_requires_claimer(session: AsyncSession):
+    t = await create_task(session, TaskCreate(title="t", status=TaskStatus.READY))
+    await claim_task(session, t.id, "codex")
+    with pytest.raises(PermissionError):
+        await set_task_branch(session, t.id, "hermes", "feat/x")
+
+
+@pytest.mark.asyncio
+async def test_set_task_branch_sets_branch(session: AsyncSession):
+    t = await create_task(session, TaskCreate(title="t", status=TaskStatus.READY))
+    await claim_task(session, t.id, "codex")
+    out = await set_task_branch(session, t.id, "codex", "feat/dark-mode")
+    assert out.branch == "feat/dark-mode"
+
+
+@pytest.mark.asyncio
+async def test_set_task_pr_requires_claimer(session: AsyncSession):
+    t = await create_task(session, TaskCreate(title="t", status=TaskStatus.READY))
+    await claim_task(session, t.id, "codex")
+    with pytest.raises(PermissionError):
+        await set_task_pr(session, t.id, "hermes", "https://github.com/x/y/pull/1", "open")
+
+
+@pytest.mark.asyncio
+async def test_set_task_pr_sets_url_and_status(session: AsyncSession):
+    t = await create_task(session, TaskCreate(title="t", status=TaskStatus.READY))
+    await claim_task(session, t.id, "codex")
+    out = await set_task_pr(
+        session, t.id, "codex", "https://github.com/x/y/pull/1", "open"
+    )
+    assert out.pr_url == "https://github.com/x/y/pull/1"
+    assert out.pr_status == "open"
+
+
+@pytest.mark.asyncio
+async def test_request_review_collects_diff_when_configured(session: AsyncSession):
+    t = await create_task(
+        session,
+        TaskCreate(
+            title="t",
+            status=TaskStatus.READY,
+            repo_path="/tmp/fakerepo",
+            base_branch="main",
+        ),
+    )
+    await claim_task(session, t.id, "codex")
+    await set_task_branch(session, t.id, "codex", "feat/x")
+
+    fake_diff = "--- a/f.txt\n+++ b/f.txt\n@@ -1 +1 @@\n-old\n+new\n"
+    with patch("agent_kanban.services.collect_diff", new=AsyncMock(return_value=fake_diff)):
+        await request_review(session, t.id, "codex", summary="review please")
+
+    from sqlmodel import select
+    from agent_kanban.models import ProgressEvent
+    stmt = select(ProgressEvent).where(ProgressEvent.task_id == t.id)
+    result = await session.execute(stmt)
+    events = list(result.scalars())
+    diff_events = [e for e in events if e.kind.value == "diff"]
+    assert len(diff_events) == 1
+    assert "old" in diff_events[0].payload["content"]
+    assert "new" in diff_events[0].payload["content"]
+
+
+@pytest.mark.asyncio
+async def test_request_review_skips_diff_without_repo_path(session: AsyncSession):
+    t = await create_task(session, TaskCreate(title="t", status=TaskStatus.READY))
+    await claim_task(session, t.id, "codex")
+
+    with patch("agent_kanban.services.collect_diff", new=AsyncMock()) as mock_diff:
+        await request_review(session, t.id, "codex", summary="review please")
+        mock_diff.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_request_review_records_error_event_on_git_failure(session: AsyncSession):
+    t = await create_task(
+        session,
+        TaskCreate(
+            title="t",
+            status=TaskStatus.READY,
+            repo_path="/tmp/fakerepo",
+            base_branch="main",
+        ),
+    )
+    await claim_task(session, t.id, "codex")
+    await set_task_branch(session, t.id, "codex", "feat/x")
+
+    with patch(
+        "agent_kanban.services.collect_diff",
+        new=AsyncMock(side_effect=GitError("boom")),
+    ):
+        await request_review(session, t.id, "codex", summary="review please")
+
+    from sqlmodel import select
+    from agent_kanban.models import ProgressEvent
+    stmt = select(ProgressEvent).where(ProgressEvent.task_id == t.id)
+    result = await session.execute(stmt)
+    events = list(result.scalars())
+    error_events = [e for e in events if e.kind.value == "error"]
+    assert len(error_events) == 1
+    assert "boom" in error_events[0].payload["content"]
+    # Status still moved to review despite the git failure.
+    refreshed = await get_task(session, t.id)
+    assert refreshed.status == TaskStatus.REVIEW

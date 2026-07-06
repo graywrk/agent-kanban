@@ -41,6 +41,8 @@ class TaskCreate(BaseModel):
     project_id: Optional[int] = None
     status: TaskStatus = TaskStatus.TODO
     sort_order: float = 0.0
+    repo_path: Optional[str] = None
+    base_branch: Optional[str] = None
 
 
 class TaskUpdate(BaseModel):
@@ -50,6 +52,11 @@ class TaskUpdate(BaseModel):
     status: Optional[TaskStatus] = None
     sort_order: Optional[float] = None
     project_id: Optional[int] = None
+    branch: Optional[str] = None
+    pr_url: Optional[str] = None
+    pr_status: Optional[str] = None
+    repo_path: Optional[str] = None
+    base_branch: Optional[str] = None
 
 
 class TaskRead(ReadBase):
