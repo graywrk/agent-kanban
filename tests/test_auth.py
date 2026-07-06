@@ -1,4 +1,3 @@
-import pytest
 
 from agent_kanban.auth import (
     generate_token,
