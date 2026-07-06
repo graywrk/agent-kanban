@@ -4,7 +4,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
 
-from agent_kanban.auth import _resolve_bearer, _resolve_cookie, resolve_ticket
+from agent_kanban.auth import _resolve_cookie, resolve_ticket
 from agent_kanban.db import AsyncSessionLocal
 from agent_kanban.events import event_bus
 
@@ -16,7 +16,6 @@ async def ws_endpoint(
     websocket: WebSocket,
     task_id: Optional[int] = None,
     ticket: Optional[str] = Query(None, description="Single-use WS ticket from POST /api/ws-ticket"),
-    token: Optional[str] = Query(None, description="Bearer token (deprecated; use ticket)"),
 ):
     # 1. Ticket path (preferred) — no DB hit, single-use nonce.
     if ticket:
@@ -28,14 +27,10 @@ async def ws_endpoint(
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    # 2. Session cookie or bearer fallback (same-origin / legacy).
+    # 2. Session cookie fallback (same-origin deployments).
     async with AsyncSessionLocal() as session:
         user_id = websocket.session.get("user_id") if hasattr(websocket, "session") else None
-        ok = False
-        if user_id is not None:
-            ok = (await _resolve_cookie(session, int(user_id))) is not None
-        if not ok and token:
-            ok = (await _resolve_bearer(session, token)) is not None
+        ok = user_id is not None and (await _resolve_cookie(session, int(user_id))) is not None
     if not ok:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
