@@ -29,14 +29,14 @@ const EXT_LANG: Record<string, string> = {
   py: "python", sh: "bash", bash: "bash", json: "json",
 };
 
-function langFromDiff(content: string): string {
-  // Try to read a filename from a +++ b/... or diff --git a/... line.
+function sourceLangLabel(content: string): string {
+  // Extract the source language for DISPLAY ONLY (not the highlight grammar).
   const m = content.match(/^(?:\+\+\+ b\/|diff --git a\/)([^\n]+)/m);
   if (m) {
     const ext = m[1].split(".").pop()?.toLowerCase() ?? "";
     if (ext && EXT_LANG[ext]) return EXT_LANG[ext];
   }
-  return "diff";
+  return "";
 }
 
 export function ProgressFeed({
@@ -121,7 +121,8 @@ function DiffItem({
   expanded: boolean;
   onToggle: () => void;
 }) {
-  const lang = useMemo(() => langFromDiff(content), [content]);
+  const highlightLang = "diff";
+  const label = useMemo(() => sourceLangLabel(content), [content]);
   const [html, setHtml] = useState<string | null>(null);
 
   useEffect(() => {
@@ -129,11 +130,11 @@ function DiffItem({
     let cancelled = false;
     getHighlighter().then((h) => {
       if (cancelled) return;
-      const out = h.codeToHtml(content, { lang, theme: "github-light" });
+      const out = h.codeToHtml(content, { lang: highlightLang, theme: "github-light" });
       setHtml(out);
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [expanded, content, lang]);
+  }, [expanded, content, highlightLang]);
 
   const stats = content.match(/@@.*@@/g)?.length ?? 0;
   return (
@@ -142,7 +143,7 @@ function DiffItem({
         onClick={onToggle}
         style={{ width: "100%", textAlign: "left", padding: 6, background: "none", border: "none", cursor: "pointer" }}
       >
-        {expanded ? "▼" : "▶"} diff · {ts} · {agent} · {lang}{stats > 0 ? ` · ${stats} hunk(s)` : ""}
+        {expanded ? "▼" : "▶"} diff · {ts} · {agent}{label ? ` · ${label}` : ""}{stats > 0 ? ` · ${stats} hunk(s)` : ""}
       </button>
       {expanded && (
         html ? (

@@ -286,6 +286,39 @@ async def post_comment(
     return c
 
 
+async def post_comment_with_status(
+    session: AsyncSession,
+    task_id: int,
+    author: str,
+    content: str,
+    target_status: Optional[TaskStatus],
+) -> Comment:
+    """Post a comment and optionally transition the task status, atomically.
+
+    Both the comment insert and the status update commit together. If the
+    status update fails, the comment is not persisted either.
+    """
+    # Validate task exists.
+    task = await get_task(session, task_id)
+    # Insert comment (no commit yet).
+    c = Comment(task_id=task_id, author=author, content=content)
+    session.add(c)
+    # Apply status transition if any.
+    if target_status is not None:
+        task.status = target_status
+        task.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    # Single commit for both.
+    await session.commit()
+    await session.refresh(c)
+    await event_bus.publish(
+        f"task:{task_id}",
+        {"type": "comment", "comment_id": c.id, "author": author},
+    )
+    if target_status is not None:
+        await _publish_task_event("board", "task_updated", task)
+    return c
+
+
 # ---- Artifacts ----
 async def post_artifact(
     session: AsyncSession, task_id: int, data: ArtifactCreate

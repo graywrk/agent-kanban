@@ -88,3 +88,22 @@ async def test_comment_with_invalid_status_returns_422(client):
         json={"author": "user", "content": "x"},
     )
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_post_comment_with_status_is_atomic(session):
+    """If the status update would fail, the comment must not be persisted either."""
+    from agent_kanban.services import post_comment_with_status
+    from agent_kanban.models import TaskStatus
+    # Use a non-existent task_id to trigger a ValueError inside the service
+    # (get_task raises). The comment must NOT be persisted.
+    from sqlmodel import select
+    from agent_kanban.models import Comment
+    with pytest.raises(ValueError):
+        await post_comment_with_status(
+            session, 999999, "user", "should not persist", TaskStatus.IN_PROGRESS
+        )
+    # Verify no comment was committed for the ghost task.
+    stmt = select(Comment).where(Comment.task_id == 999999)
+    result = await session.execute(stmt)
+    assert result.scalars().all() == []
