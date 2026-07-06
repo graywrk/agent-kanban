@@ -71,4 +71,16 @@ async def session(db_url):
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with factory() as s:
         yield s
+    # Isolate tests: every test shares one DB, so truncate all tables between
+    # tests. Without this, ordering-sensitive queries (e.g. get_next_task over
+    # READY rows) become non-deterministic across the suite.
+    async with engine.begin() as conn:
+        from sqlalchemy import text
+
+        await conn.execute(
+            text(
+                "TRUNCATE TABLE project, task, progressevent, comment, artifact "
+                "RESTART IDENTITY CASCADE"
+            )
+        )
     await engine.dispose()
