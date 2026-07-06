@@ -277,3 +277,60 @@ async def test_request_review_records_error_event_on_git_failure(session: AsyncS
     # Status still moved to review despite the git failure.
     refreshed = await get_task(session, t.id)
     assert refreshed.status == TaskStatus.REVIEW
+
+
+@pytest.mark.asyncio
+async def test_post_progress_artifact_ref_injects_id(session: AsyncSession):
+    """When an artifact_ref event references a registered artifact path, the
+    stored payload's artifact dict includes the artifact's id so the UI can
+    fetch via /api/artifacts/{id}/content."""
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as d:
+        repo = Path(d)
+        (repo / "out.txt").write_text("hi")
+        t = await create_task(
+            session,
+            TaskCreate(title="t", status=TaskStatus.READY, repo_path=str(repo)),
+        )
+        await claim_task(session, t.id, "codex")
+        # Register the artifact (post_artifact enforces the sandbox).
+        art = await post_artifact(
+            session,
+            t.id,
+            ArtifactCreate(agent="codex", kind="log", path=str(repo / "out.txt")),
+        )
+        # Now post an artifact_ref progress event referencing the same path.
+        ev = await post_progress(
+            session,
+            t.id,
+            ProgressCreate(
+                agent="codex",
+                kind=ProgressKind.ARTIFACT_REF,
+                content="see attached log",
+                artifact={"path": str(repo / "out.txt"), "kind": "log"},
+            ),
+        )
+        assert ev.payload["artifact"]["id"] == art.id
+        assert ev.payload["artifact"]["path"] == str(repo / "out.txt")
+
+
+@pytest.mark.asyncio
+async def test_post_progress_artifact_ref_without_matching_row(session: AsyncSession):
+    """If no Artifact row matches the path, the payload is stored without id;
+    the UI falls back gracefully."""
+    t = await create_task(session, TaskCreate(title="t", status=TaskStatus.READY))
+    await claim_task(session, t.id, "codex")
+    ev = await post_progress(
+        session,
+        t.id,
+        ProgressCreate(
+            agent="codex",
+            kind=ProgressKind.ARTIFACT_REF,
+            content="orphan reference",
+            artifact={"path": "/nonexistent/file", "kind": "file"},
+        ),
+    )
+    assert "id" not in ev.payload["artifact"]
+    assert ev.payload["artifact"]["path"] == "/nonexistent/file"

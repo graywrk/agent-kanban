@@ -173,7 +173,24 @@ async def post_progress(
     _check_claimer(task, data.agent)
     payload: dict = {"content": data.content}
     if data.kind.value == "artifact_ref" and data.artifact:
-        payload["artifact"] = data.artifact
+        # Copy so we can mutate; data.artifact is the agent-supplied dict.
+        payload["artifact"] = dict(data.artifact)
+        # Look up the most recent Artifact row for this task + path so the UI
+        # can fetch the file via /api/artifacts/{id}/content. Never raises — a
+        # select won't fail; if no row matches, the payload is left as-is and
+        # the UI falls back to the file:/// path.
+        art_path = data.artifact.get("path")
+        if art_path:
+            stmt = (
+                select(Artifact)
+                .where(Artifact.task_id == task_id, Artifact.path == art_path)
+                .order_by(Artifact.id.desc())
+                .limit(1)
+            )
+            result = await session.execute(stmt)
+            row = result.scalars().first()
+            if row is not None:
+                payload["artifact"]["id"] = row.id
     blocked = False
     if data.kind.value == "status_change" and data.status:
         payload["status"] = data.status
