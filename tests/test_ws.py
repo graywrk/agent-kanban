@@ -1,8 +1,5 @@
-import asyncio
-import json
 
 import pytest
-from httpx import ASGITransport, AsyncClient
 from starlette.testclient import TestClient
 
 from agent_kanban.server import create_app

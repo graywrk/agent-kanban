@@ -59,3 +59,33 @@ async def test_collect_diff_raises_on_bad_repo(tmp_repo):
 async def test_collect_diff_raises_on_missing_path(tmp_path):
     with pytest.raises(GitError):
         await collect_diff(tmp_path / "does-not-exist", "main", "feat")
+
+
+@pytest.mark.asyncio
+async def test_collect_diff_times_out_and_kills_process(tmp_repo):
+    """A short timeout must raise GitError and not leak the git process."""
+    # Use an extremely short timeout to force the timeout branch even on a fast machine.
+    # We make git slow by diffing against a ref that requires walking a lot — but the
+    # simplest reliable way is a timeout shorter than any real git invocation.
+    with pytest.raises(GitError, match="timed out"):
+        # timeout_s=0 means wait_for fires immediately after the process is created.
+        await collect_diff(tmp_repo, "main", "feat", timeout_s=0.0)
+
+
+@pytest.mark.asyncio
+async def test_collect_diffstats_returns_per_file_counts(tmp_repo):
+    from agent_kanban.git import collect_diffstats
+    stats = await collect_diffstats(tmp_repo, "main", "feat")
+    assert isinstance(stats, list)
+    assert len(stats) == 1
+    entry = stats[0]
+    assert entry["path"] == "README.md"
+    assert entry["added"] == 1
+    assert entry["deleted"] == 1
+
+
+@pytest.mark.asyncio
+async def test_collect_diffstats_empty_when_no_changes(tmp_repo):
+    from agent_kanban.git import collect_diffstats
+    stats = await collect_diffstats(tmp_repo, "main", "main")
+    assert stats == []

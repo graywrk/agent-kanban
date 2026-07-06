@@ -38,7 +38,14 @@ export function CardDetail({ taskId, onBack }: { taskId: number; onBack: () => v
             <a href={task.pr_url} target="_blank" rel="noreferrer">
               #{task.pr_url.split("/").pop()}
             </a>{" "}
-            <em style={{ color: task.pr_status === "merged" ? "#166534" : "#666" }}>
+            <em
+              style={{
+                color:
+                  task.pr_status === "merged" ? "#166534"
+                  : task.pr_status === "closed" ? "#991b1b"
+                  : "#1e40af",
+              }}
+            >
               ({task.pr_status ?? "open"})
             </em>
           </>

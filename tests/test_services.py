@@ -11,7 +11,6 @@ from agent_kanban.services import (
     post_artifact,
     post_progress,
     request_review,
-    update_task,
 )
 from agent_kanban.models import ProgressKind
 
@@ -25,7 +24,7 @@ async def test_create_task_defaults_to_todo(session: AsyncSession):
 
 @pytest.mark.asyncio
 async def test_get_next_task_returns_only_ready(session: AsyncSession):
-    a = await create_task(session, TaskCreate(title="a", status=TaskStatus.TODO))
+    await create_task(session, TaskCreate(title="a", status=TaskStatus.TODO))
     b = await create_task(session, TaskCreate(title="b", status=TaskStatus.READY))
     nxt = await get_next_task(session, None, None, None)
     assert nxt is not None
@@ -219,7 +218,9 @@ async def test_request_review_collects_diff_when_configured(session: AsyncSessio
     await set_task_branch(session, t.id, "codex", "feat/x")
 
     fake_diff = "--- a/f.txt\n+++ b/f.txt\n@@ -1 +1 @@\n-old\n+new\n"
-    with patch("agent_kanban.services.collect_diff", new=AsyncMock(return_value=fake_diff)):
+    fake_stats = [{"path": "f.txt", "added": 1, "deleted": 1}]
+    with patch("agent_kanban.services.collect_diff", new=AsyncMock(return_value=fake_diff)), \
+         patch("agent_kanban.services.collect_diffstats", new=AsyncMock(return_value=fake_stats)):
         await request_review(session, t.id, "codex", summary="review please")
 
     from sqlmodel import select
@@ -231,6 +232,8 @@ async def test_request_review_collects_diff_when_configured(session: AsyncSessio
     assert len(diff_events) == 1
     assert "old" in diff_events[0].payload["content"]
     assert "new" in diff_events[0].payload["content"]
+    assert diff_events[0].payload["files"] == ["f.txt"]
+    assert diff_events[0].payload["stats"]["f.txt"] == "+1 -1"
 
 
 @pytest.mark.asyncio
@@ -274,3 +277,102 @@ async def test_request_review_records_error_event_on_git_failure(session: AsyncS
     # Status still moved to review despite the git failure.
     refreshed = await get_task(session, t.id)
     assert refreshed.status == TaskStatus.REVIEW
+
+
+@pytest.mark.asyncio
+async def test_request_review_diff_survives_numstat_failure(session: AsyncSession):
+    """If collect_diffstats fails after collect_diff succeeds, the diff is still
+    stored with empty stats — not lost entirely."""
+    from sqlmodel import select
+    from agent_kanban.models import ProgressEvent
+
+    t = await create_task(
+        session,
+        TaskCreate(
+            title="t",
+            status=TaskStatus.READY,
+            repo_path="/tmp/fakerepo",
+            base_branch="main",
+        ),
+    )
+    await claim_task(session, t.id, "codex")
+    await set_task_branch(session, t.id, "codex", "feat/x")
+
+    fake_diff = "--- a/f.txt\n+++ b/f.txt\n@@ -1 +1 @@\n-old\n+new\n"
+    with patch("agent_kanban.services.collect_diff", new=AsyncMock(return_value=fake_diff)), \
+         patch("agent_kanban.services.collect_diffstats", new=AsyncMock(side_effect=GitError("numstat boom"))):
+        await request_review(session, t.id, "codex", summary="review please")
+
+    stmt = select(ProgressEvent).where(ProgressEvent.task_id == t.id)
+    result = await session.execute(stmt)
+    events = list(result.scalars())
+    diff_events = [e for e in events if e.kind.value == "diff"]
+    error_events = [e for e in events if e.kind.value == "error"]
+    # Diff survived.
+    assert len(diff_events) == 1
+    assert "old" in diff_events[0].payload["content"]
+    # Stats degraded to empty.
+    assert diff_events[0].payload["stats"] == {}
+    assert diff_events[0].payload["files"] == []
+    # No error event was written for the numstat failure.
+    assert error_events == []
+    # Status moved to review.
+    refreshed = await get_task(session, t.id)
+    assert refreshed.status == TaskStatus.REVIEW
+
+
+@pytest.mark.asyncio
+async def test_post_progress_artifact_ref_injects_id(session: AsyncSession):
+    """When an artifact_ref event references a registered artifact path, the
+    stored payload's artifact dict includes the artifact's id so the UI can
+    fetch via /api/artifacts/{id}/content."""
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as d:
+        repo = Path(d)
+        (repo / "out.txt").write_text("hi")
+        t = await create_task(
+            session,
+            TaskCreate(title="t", status=TaskStatus.READY, repo_path=str(repo)),
+        )
+        await claim_task(session, t.id, "codex")
+        # Register the artifact (post_artifact enforces the sandbox).
+        art = await post_artifact(
+            session,
+            t.id,
+            ArtifactCreate(agent="codex", kind="log", path=str(repo / "out.txt")),
+        )
+        # Now post an artifact_ref progress event referencing the same path.
+        ev = await post_progress(
+            session,
+            t.id,
+            ProgressCreate(
+                agent="codex",
+                kind=ProgressKind.ARTIFACT_REF,
+                content="see attached log",
+                artifact={"path": str(repo / "out.txt"), "kind": "log"},
+            ),
+        )
+        assert ev.payload["artifact"]["id"] == art.id
+        assert ev.payload["artifact"]["path"] == str(repo / "out.txt")
+
+
+@pytest.mark.asyncio
+async def test_post_progress_artifact_ref_without_matching_row(session: AsyncSession):
+    """If no Artifact row matches the path, the payload is stored without id;
+    the UI falls back gracefully."""
+    t = await create_task(session, TaskCreate(title="t", status=TaskStatus.READY))
+    await claim_task(session, t.id, "codex")
+    ev = await post_progress(
+        session,
+        t.id,
+        ProgressCreate(
+            agent="codex",
+            kind=ProgressKind.ARTIFACT_REF,
+            content="orphan reference",
+            artifact={"path": "/nonexistent/file", "kind": "file"},
+        ),
+    )
+    assert "id" not in ev.payload["artifact"]
+    assert ev.payload["artifact"]["path"] == "/nonexistent/file"

@@ -2,7 +2,7 @@
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlmodel import SQLModel, select
+from sqlmodel import select
 
 from agent_kanban.models import ProgressEvent, Task, TaskStatus
 

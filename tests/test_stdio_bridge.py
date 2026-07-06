@@ -1,5 +1,4 @@
 """Smoke test for the stdio bridge: it should at least import and parse args."""
-import pytest
 
 from agent_kanban.mcp_stdio_bridge import main
 
