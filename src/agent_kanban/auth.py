@@ -55,13 +55,22 @@ class Principal(BaseModel):
 async def _resolve_bearer(session: AsyncSession, header_value: str) -> Optional[Principal]:
     """Look up a Token row whose hash matches the bearer value.
 
-    Tokens are hashed with bcrypt; we don't know the salt ahead of time, so we
-    scan candidate rows. For a small N of tokens (typical: <50) this is fine.
-    If N grows, add a token_prefix column (first 8 chars) and index it, then
-    filter on the prefix before the bcrypt loop.
+    Filters by the first-8-char prefix (indexed) before bcrypt-verifying, so
+    the typical cost is one index lookup + one bcrypt check instead of N.
+    Falls back to a full scan if the prefix column is empty (legacy rows
+    whose plaintext was lost), so existing tokens keep working.
     """
-    result = await session.execute(select(Token))
-    for row in result.scalars():
+    prefix = header_value[:8]
+    # Try the prefix-filtered path first.
+    stmt = select(Token).where(Token.token_prefix == prefix)
+    result = await session.execute(stmt)
+    candidates = list(result.scalars())
+    if not candidates:
+        # Fallback: legacy rows with empty prefix.
+        legacy_stmt = select(Token).where(Token.token_prefix == "")
+        legacy_result = await session.execute(legacy_stmt)
+        candidates = list(legacy_result.scalars())
+    for row in candidates:
         if verify_token(header_value, row.token_hash):
             row.last_used_at = datetime.now(UTC).replace(tzinfo=None)
             await session.commit()

@@ -95,6 +95,7 @@ async def create_token(
     tok = Token(
         agent_name=body.agent_name,
         token_hash=hash_token(plain),
+        token_prefix=plain[:8],
         description=body.description,
         created_by_user_id=principal.user_id,
     )
