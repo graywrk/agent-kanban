@@ -8,12 +8,33 @@ from fastapi.staticfiles import StaticFiles
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.requests import Request
 
 from agent_kanban.config import get_settings
 from agent_kanban.mcp_server import MCPAuthMiddleware, create_mcp
 from agent_kanban.ratelimit import limiter
 from agent_kanban.routes import artifacts, auth as auth_routes, comments, progress, projects, tasks, ws
+
+
+class _MCPTrailingSlashMiddleware(BaseHTTPMiddleware):
+    """Rewrite a bare ``/mcp`` POST to ``/mcp/`` so it reaches the mounted app.
+
+    ``app.mount("/mcp", sub)`` only matches ``/mcp/``; a POST to ``/mcp`` (no
+    trailing slash) returns 405 Method Not Allowed. MCP clients (ZCode, Codex,
+    Hermes) frequently POST to the bare path. A 307 redirect doesn't help — POST
+    clients don't follow it. So we rewrite the path at the middleware layer,
+    before Starlette's router dispatches. Only applies to the exact bare path;
+    sub-paths like ``/mcp/something`` are left untouched.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path == "/mcp":
+            # Mutate scope in place: the router reads path from the ASGI scope.
+            request.scope["path"] = "/mcp/"
+            request.scope["raw_path"] = b"/mcp/"
+        return await call_next(request)
 
 
 async def _bootstrap_admin() -> None:
@@ -107,6 +128,9 @@ def create_app() -> FastAPI:
         same_site="lax",
         https_only=settings.public_url.startswith("https"),
     )
+    # Trailing-slash rewrite for /mcp. Registered LAST so it's the outermost
+    # layer and runs before routing dispatches to the mounted sub-app.
+    app.add_middleware(_MCPTrailingSlashMiddleware)
     app.include_router(projects.router)
     app.include_router(tasks.router)
     app.include_router(progress.router)
@@ -116,10 +140,12 @@ def create_app() -> FastAPI:
     app.include_router(ws.router)
 
     # Mount MCP HTTP transport at /mcp. With FastMCP's streamable_http_path="/",
-    # the canonical endpoint is /mcp/ (and /mcp 307-redirects to it). The
-    # MCPAuthMiddleware wraps the inner app so every /mcp request resolves a
-    # Principal from the bearer header into a ContextVar that the tool
-    # verifiers read.
+    # the canonical endpoint is /mcp/. The MCPAuthMiddleware wraps the inner
+    # app so every /mcp request resolves a Principal from the bearer header
+    # into a ContextVar that the tool verifiers read. The
+    # _MCPTrailingSlashMiddleware (registered as app middleware) rewrites a
+    # bare POST /mcp → /mcp/ so MCP clients that omit the slash (ZCode, Codex,
+    # Hermes) don't hit 405 Method Not Allowed.
     app.mount("/mcp", MCPAuthMiddleware(mcp_http_app))
     # Expose the FastMCP instance on the app so tests can drive its session
     # manager without re-deriving it from the mounted sub-app's routes.
