@@ -1,5 +1,10 @@
 # Agent Kanban
 
+[![Languages: RU / EN](https://img.shields.io/badge/README-EN-amber.svg)](README.md)
+[![Languages: RU / EN](https://img.shields.io/badge/README-RU-lightgrey.svg)](README.ru.md)
+
+> **English** · [Русский](README.ru.md)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-amber.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![MCP](https://img.shields.io/badge/MCP-streamable_HTTP-orange.svg)](https://modelcontextprotocol.io/)
