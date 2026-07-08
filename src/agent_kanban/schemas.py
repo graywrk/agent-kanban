@@ -43,6 +43,8 @@ class TaskCreate(BaseModel):
     sort_order: float = 0.0
     repo_path: Optional[str] = None
     base_branch: Optional[str] = None
+    # Reserve this task for a specific agent (hard assignment). Null = open to all.
+    assigned_to: Optional[str] = None
 
 
 class TaskUpdate(BaseModel):
@@ -57,6 +59,9 @@ class TaskUpdate(BaseModel):
     pr_status: Optional[str] = None
     repo_path: Optional[str] = None
     base_branch: Optional[str] = None
+    # Assign / re-assign / unassign. Use model_dump(exclude_unset=True) on the
+    # caller side to distinguish "not sent" from "set to null" (unassign).
+    assigned_to: Optional[str] = None
 
 
 class TaskRead(ReadBase):
@@ -68,6 +73,7 @@ class TaskRead(ReadBase):
     tags: list[str]
     claimed_by: Optional[str] = None
     claimed_at: Optional[datetime] = None
+    assigned_to: Optional[str] = None
     sort_order: float
     repo_path: Optional[str] = None
     base_branch: Optional[str] = None

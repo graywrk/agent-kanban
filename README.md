@@ -1,9 +1,54 @@
 # Agent Kanban
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-amber.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
+[![MCP](https://img.shields.io/badge/MCP-streamable_HTTP-orange.svg)](https://modelcontextprotocol.io/)
+
 An AI-native kanban board where agents (Codex, Hermes, etc.) pull tasks via
 the Model Context Protocol. The board is passive — it never spawns or controls
 agents. You point your agents at the board via MCP config, and they
 self-serve tasks through `get_next_task` / `claim_task`.
+
+## Why?
+
+Most agent orchestrators **push** work: a dispatcher decides who does what and
+sends it. Agent Kanban inverts this — the board is a passive **MCP server**.
+Agents discover and claim work when they're ready, exactly like a developer
+picks a ticket from a real kanban. This decouples "what needs doing" (the board)
+from "who does it and when" (the agent), and works with any agent that speaks
+MCP — no glue code per agent.
+
+## Features
+
+- **Pull-based MCP** — board exposes 11 tools (`get_next_task`, `claim_task`,
+  `post_progress`, `request_review`, …) over the streamable-HTTP transport
+- **Hard assignment** — reserve a task for a specific agent; others don't see it
+- **Live progress feed** — agents stream diffs, text, artifacts, errors; you
+  comment back and the agent reads your feedback on the next turn
+- **Bilingual UI** — Russian / English, with a one-click language toggle
+- **Review diffs** — the board collects `git diff base...branch` on
+  `request_review` and renders it inline (Shiki syntax highlighting)
+- **Design system** — dark-first, single-amber-accent UI built on tokens
+- **Self-hosted** — FastAPI + PostgreSQL + React; ships as a Docker image
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%" align="center"><b>Board (dark)</b></td>
+    <td width="50%" align="center"><b>Card detail</b></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/board.png" alt="Board view"></td>
+    <td><img src="docs/screenshots/card-detail.png" alt="Card detail"></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><b>First-run setup</b></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><img src="docs/screenshots/login.png" alt="Login / setup screen" width="50%"></td>
+  </tr>
+</table>
 
 ## Architecture
 
@@ -147,3 +192,29 @@ Runs the app on :7331 with Postgres in an internal-only container (not exposed t
 the host). The app connects to it over the compose network as `postgres:5432`.
 For local dev against a host-visible Postgres, see the standalone container note
 in "Database" above (port 5436).
+
+## Contributing
+
+Contributions are welcome. The design spec and phased implementation plans live
+under `docs/superpowers/` — they're a good map of the architecture and intent.
+
+```bash
+# clone, then:
+uv sync --extra dev          # backend deps + test tooling
+cd web && pnpm install       # frontend deps
+uv run pytest -q             # 112+ tests
+cd web && pnpm build         # type-check + bundle
+```
+
+Please open an issue first for non-trivial changes, so we can align on scope.
+
+## Credits
+
+The UI is built on a design system inspired by
+[Sergey Dmitriev's brand book](https://brandbook.graywrk.ru) — amber as the
+single UI accent, dark-first, with semantic-only status colors.
+
+## License
+
+[MIT](LICENSE) © Sergey Dmitriev
+

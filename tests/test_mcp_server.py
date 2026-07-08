@@ -360,3 +360,131 @@ async def test_matching_verifier_rejects_mismatched_agent(session: AsyncSession)
             await _real_require_matching_agent("hermes")
     finally:
         _real_mcp_principal.reset(token)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Hard assignment: a task with `assigned_to` set is reserved for that agent.
+# Other agents don't see it in get_next_task / list_tasks and can't claim it.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _stub_agent(monkeypatch, agent_name: str):
+    """Override the autouse ``_stub_mcp_principal`` (always "codex") so the
+    calling agent in this test is ``agent_name``. Used to simulate two different
+    agents hitting the MCP tools in the same test."""
+    from agent_kanban.auth import Principal
+
+    async def _matching(agent):
+        if agent != agent_name:
+            raise PermissionError(f"agent {agent!r} != {agent_name!r}")
+        return Principal(kind="token", agent_name=agent_name)
+
+    async def _any():
+        return Principal(kind="token", agent_name=agent_name)
+
+    monkeypatch.setattr(mcp_server, "_require_matching_agent", _matching)
+    monkeypatch.setattr(mcp_server, "_require_any_principal", _any)
+
+
+@pytest.mark.asyncio
+async def test_get_next_task_hides_other_agents_assigned(session: AsyncSession, monkeypatch):
+    """An agent does not see READY tasks assigned to a different agent."""
+    mine = await create_task(session, TaskCreate(title="mine", status=TaskStatus.READY, assigned_to="codex"))
+    _theirs = await create_task(
+        session, TaskCreate(title="theirs", status=TaskStatus.READY, assigned_to="hermes")
+    )
+    _open = await create_task(session, TaskCreate(title="open", status=TaskStatus.READY))
+
+    _stub_agent(monkeypatch, "codex")
+    result = await mcp.call_tool("get_next_task", {})
+    data = _to_dict(result)
+
+    # Codex sees its own assigned task first (sort_order/created_at ordering),
+    # then the open one — but never "theirs".
+    titles = [d["title"] for d in [data] if isinstance(data, dict)]
+    # get_next returns ONE task; verify it's never "theirs".
+    assert isinstance(data, dict)
+    assert data["title"] != "theirs"
+    # Sanity: codex's own task exists and is reachable.
+    assert mine.assigned_to == "codex"
+
+
+@pytest.mark.asyncio
+async def test_get_next_task_returns_assigned_to_self(session: AsyncSession, monkeypatch):
+    """An agent DOES see a task assigned to it (before unassigned ones)."""
+    _theirs = await create_task(
+        session, TaskCreate(title="theirs", status=TaskStatus.READY, assigned_to="hermes")
+    )
+    mine = await create_task(
+        session, TaskCreate(title="mine", status=TaskStatus.READY, assigned_to="codex")
+    )
+
+    _stub_agent(monkeypatch, "codex")
+    result = await mcp.call_tool("get_next_task", {})
+    data = _to_dict(result)
+    assert isinstance(data, dict)
+    assert data["title"] == "mine"
+    assert data["assigned_to"] == "codex"
+    assert mine.assigned_to == "codex"
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_hides_other_agents_assigned(session: AsyncSession, monkeypatch):
+    """list_tasks for an agent excludes tasks assigned to other agents."""
+    await create_task(session, TaskCreate(title="open", status=TaskStatus.READY))
+    await create_task(session, TaskCreate(title="mine", status=TaskStatus.READY, assigned_to="codex"))
+    await create_task(session, TaskCreate(title="theirs", status=TaskStatus.READY, assigned_to="hermes"))
+
+    _stub_agent(monkeypatch, "codex")
+    result = await mcp.call_tool("list_tasks", {})
+    data = _to_dict(result)
+    titles = [t["title"] for t in data]
+    assert "open" in titles
+    assert "mine" in titles
+    assert "theirs" not in titles
+
+
+@pytest.mark.asyncio
+async def test_claim_task_rejects_other_agents_assigned(session: AsyncSession, monkeypatch):
+    """claim_task on a task assigned to another agent → ok=False, reserved."""
+    t = await create_task(
+        session, TaskCreate(title="reserved", status=TaskStatus.READY, assigned_to="hermes")
+    )
+
+    _stub_agent(monkeypatch, "codex")
+    result = await mcp.call_tool("claim_task", {"task_id": t.id, "agent": "codex"})
+    data = _to_dict(result)
+    assert data["ok"] is False
+    assert "reserved" in data["reason"]
+    assert "hermes" in data["reason"]
+
+
+@pytest.mark.asyncio
+async def test_claim_task_allows_assigned_to_self(session: AsyncSession, monkeypatch):
+    """The assigned agent can claim its own reserved task."""
+    t = await create_task(
+        session, TaskCreate(title="mine", status=TaskStatus.READY, assigned_to="codex")
+    )
+
+    _stub_agent(monkeypatch, "codex")
+    result = await mcp.call_tool("claim_task", {"task_id": t.id, "agent": "codex"})
+    data = _to_dict(result)
+    assert data["ok"] is True
+    assert data["task"]["claimed_by"] == "codex"
+    assert data["task"]["assigned_to"] == "codex"
+
+
+@pytest.mark.asyncio
+async def test_rest_list_shows_all_tasks_regardless_of_assignment(session: AsyncSession):
+    """The REST/UI path (agent=None) sees every task — assignment only hides
+    tasks from MCP agents, not from the human operator's board."""
+    from agent_kanban.services import list_tasks
+
+    await create_task(session, TaskCreate(title="open", status=TaskStatus.READY))
+    await create_task(session, TaskCreate(title="reserved", status=TaskStatus.READY, assigned_to="hermes"))
+
+    tasks = await list_tasks(session)  # agent=None → no filter
+    titles = [t.title for t in tasks]
+    assert "open" in titles
+    assert "reserved" in titles
+

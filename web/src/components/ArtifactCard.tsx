@@ -4,10 +4,10 @@ import type { ArtifactMeta } from "../types";
 const IMAGE_KINDS = new Set(["screenshot", "image", "png", "jpg", "jpeg", "gif", "webp"]);
 
 function iconFor(kind: string): string {
-  if (IMAGE_KINDS.has(kind.toLowerCase())) return "🖼";
-  if (kind.includes("log")) return "📜";
-  if (kind.includes("diff") || kind.includes("patch")) return "🔧";
-  return "📎";
+  if (IMAGE_KINDS.has(kind.toLowerCase())) return "IMG";
+  if (kind.includes("log")) return "LOG";
+  if (kind.includes("diff") || kind.includes("patch")) return "DIFF";
+  return "FILE";
 }
 
 export function ArtifactCard({
@@ -19,9 +19,7 @@ export function ArtifactCard({
 }) {
   const [size, setSize] = useState<string | null>(null);
   const isImage = IMAGE_KINDS.has(artifact.kind.toLowerCase());
-  const contentUrl = artifact.id
-    ? `/api/artifacts/${artifact.id}/content`
-    : null;
+  const contentUrl = artifact.id ? `/api/artifacts/${artifact.id}/content` : null;
 
   useEffect(() => {
     if (!contentUrl) return;
@@ -41,31 +39,56 @@ export function ArtifactCard({
       style={{
         display: "flex",
         gap: 10,
-        padding: 8,
-        border: "1px solid #ddd",
-        borderRadius: 6,
-        background: "#fafafa",
+        padding: "8px 10px",
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius)",
+        background: "var(--elevated)",
         textDecoration: "none",
         color: "inherit",
         alignItems: "center",
+        transition: "border-color var(--transition)",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.borderColor = "var(--accent)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.borderColor = "var(--border)";
       }}
     >
       {isImage && contentUrl ? (
         <img
           src={contentUrl}
           alt={description ?? artifact.path}
-          style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 4 }}
-          onError={(e) => { e.currentTarget.style.display = "none"; }}
+          style={{ width: 40, height: 40, objectFit: "cover", borderRadius: "var(--radius-sm)" }}
+          onError={(e) => {
+            e.currentTarget.style.display = "none";
+          }}
         />
       ) : (
-        <span style={{ fontSize: 24 }}>{iconFor(artifact.kind)}</span>
+        <span
+          className="mono"
+          style={{
+            fontSize: "var(--text-eyebrow)",
+            fontWeight: 600,
+            letterSpacing: "0.05em",
+            color: "var(--text-mute)",
+            background: "var(--canvas)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-sm)",
+            padding: "5px 6px",
+            flexShrink: 0,
+          }}
+        >
+          {iconFor(artifact.kind)}
+        </span>
       )}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <div className="ellipsis" style={{ fontWeight: 500 }}>
           {description ?? artifact.path.split("/").pop() ?? artifact.path}
         </div>
-        <div style={{ fontSize: 11, color: "#666" }}>
-          {artifact.kind}{size ? ` · ${size}` : ""}
+        <div className="mono muted" style={{ fontSize: "var(--text-small)" }}>
+          {artifact.kind}
+          {size ? ` · ${size}` : ""}
         </div>
       </div>
     </a>

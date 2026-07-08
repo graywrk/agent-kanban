@@ -87,14 +87,32 @@ async def update_task(session: AsyncSession, task_id: int, data: TaskUpdate) -> 
     return task
 
 
+def _assigned_to_or_open(agent: Optional[str]):
+    """SQLAlchemy filter: task is unassigned OR assigned to the given agent.
+
+    When ``agent`` is None (the REST/UI path), returns no filter — the board
+    shows every task to the human operator regardless of assignment.
+    """
+    if agent is None:
+        return None
+    return (Task.assigned_to.is_(None)) | (Task.assigned_to == agent)
+
+
 async def list_tasks(
     session: AsyncSession,
     status: Optional[TaskStatus] = None,
     tags_any: Optional[list[str]] = None,
+    agent: Optional[str] = None,
 ) -> list[Task]:
+    """List tasks. When ``agent`` is given (MCP path), only tasks that are
+    unassigned OR assigned to that agent are returned — hard-assignment hiding.
+    The UI path (agent=None) sees everything."""
     stmt = select(Task).order_by(Task.sort_order, Task.created_at)
     if status is not None:
         stmt = stmt.where(Task.status == status)
+    assigned_filter = _assigned_to_or_open(agent)
+    if assigned_filter is not None:
+        stmt = stmt.where(assigned_filter)
     result = await session.execute(stmt)
     tasks = result.scalars().all()
     if tags_any:
@@ -114,12 +132,19 @@ async def get_next_task(
     tags_any: Optional[list[str]],
     tags_all: Optional[list[str]],
     exclude_tags: Optional[list[str]],
+    agent: Optional[str] = None,
 ) -> Optional[Task]:
+    """Return the next READY task (oldest first). When ``agent`` is given (MCP
+    path), only tasks unassigned OR assigned to that agent are eligible — other
+    agents' reserved tasks are invisible here."""
     stmt = (
         select(Task)
         .where(Task.status == TaskStatus.READY)
         .order_by(Task.sort_order, Task.created_at)
     )
+    assigned_filter = _assigned_to_or_open(agent)
+    if assigned_filter is not None:
+        stmt = stmt.where(assigned_filter)
     result = await session.execute(stmt)
     for task in result.scalars():
         if tags_any and not any(t in task.tags for t in tags_any):
@@ -134,6 +159,16 @@ async def get_next_task(
 
 # ---- Claiming ----
 async def claim_task(session: AsyncSession, task_id: int, agent: str) -> ClaimResult:
+    # Pre-check the hard-assignment guard so we can return a precise reason
+    # ("reserved for X") instead of the generic "not ready" below. The atomic
+    # UPDATE additionally enforces it, so there's no TOCTOU window.
+    existing = await session.get(Task, task_id)
+    if existing is not None and existing.assigned_to and existing.assigned_to != agent:
+        return ClaimResult(
+            ok=False,
+            reason=f"task is reserved for {existing.assigned_to!r}",
+            task=None,
+        )
     # Atomic conditional update: only flips if status is still READY.
     stmt = (
         update(Task)
@@ -149,7 +184,7 @@ async def claim_task(session: AsyncSession, task_id: int, agent: str) -> ClaimRe
     result = await session.execute(stmt)
     row = result.first()
     if row is None:
-        # Either doesn't exist or no longer READY.
+        # Either doesn't exist, no longer READY, or (edge case above) reserved.
         task = await session.get(Task, task_id)
         if task is None:
             return ClaimResult(ok=False, reason="task not found")

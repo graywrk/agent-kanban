@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { ArtifactCard } from "./ArtifactCard";
 import type { ArtifactMeta, ProgressEvent } from "../types";
+import { useT, localeBcp47 } from "../i18n.tsx";
 
 // Shiki is loaded once for the whole feed.
 import type { Highlighter } from "shiki";
@@ -17,7 +18,7 @@ async function getHighlighter(): Promise<Highlighter> {
         langs: ["diff", "typescript", "javascript", "python", "bash", "json"],
       });
     })().catch((err) => {
-      highlighterPromise = null;  // allow retry on next call
+      highlighterPromise = null; // allow retry on next call
       throw err;
     });
   }
@@ -39,6 +40,11 @@ function sourceLangLabel(content: string): string {
   return "";
 }
 
+/** Returns "github-dark" for dark theme, "github-light" otherwise. */
+function shikiTheme(): "github-dark" | "github-light" {
+  return document.documentElement.dataset.theme === "light" ? "github-light" : "github-dark";
+}
+
 export function ProgressFeed({
   events,
   defaultExpanded = false,
@@ -46,14 +52,15 @@ export function ProgressFeed({
   events: ProgressEvent[];
   defaultExpanded?: boolean;
 }) {
+  const { t } = useT();
   const [expandAll, setExpandAll] = useState(defaultExpanded);
   const hasDiff = events.some((e) => e.kind === "diff");
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       {hasDiff && (
         <div style={{ marginBottom: 4 }}>
-          <button onClick={() => setExpandAll((v) => !v)}>
-            {expandAll ? "Collapse all diffs" : "Expand all diffs"}
+          <button className="btn btn-ghost btn-sm" onClick={() => setExpandAll((v) => !v)}>
+            {expandAll ? t("progress.collapseAll") : t("progress.expandAll")}
           </button>
         </div>
       )}
@@ -73,35 +80,82 @@ function ProgressItem({
 }) {
   const [expanded, setExpanded] = useState(false);
   const effectiveExpanded = forceExpanded || expanded;
-  const ts = new Date(event.created_at).toLocaleTimeString();
+  const ts = new Date(event.created_at).toLocaleTimeString(localeBcp47());
   const content = (event.payload.content as string) || "";
 
   if (event.kind === "status_change") {
     return (
-      <div style={{ borderTop: "1px dashed #aaa", margin: "8px 0", paddingTop: 4, fontSize: 12, color: "#666", textAlign: "center" }}>
-        ── {content} ──
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          margin: "10px 0",
+          color: "var(--text-mute)",
+          fontSize: "var(--text-small)",
+        }}
+      >
+        <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
+        <span className="mono">{content}</span>
+        <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
       </div>
     );
   }
   if (event.kind === "error") {
     return (
-      <div style={{ background: "#fee2e2", borderLeft: "3px solid #ef4444", padding: 8, borderRadius: 4 }}>
-        <div style={{ fontSize: 11, color: "#666", marginBottom: 4 }}>{ts} · {event.agent}</div>
-        <pre style={{ margin: 0, fontFamily: "monospace", color: "#991b1b", whiteSpace: "pre-wrap" }}>{content}</pre>
+      <div
+        style={{
+          background: "var(--status-error-soft)",
+          borderLeft: "3px solid var(--status-error)",
+          padding: "8px 12px",
+          borderRadius: "var(--radius)",
+        }}
+      >
+        <div className="muted mono" style={{ fontSize: "var(--text-small)", marginBottom: 4 }}>
+          {ts} · {event.agent}
+        </div>
+        <pre
+          className="mono"
+          style={{
+            margin: 0,
+            color: "var(--status-error)",
+            whiteSpace: "pre-wrap",
+            fontSize: "var(--text-mono)",
+          }}
+        >
+          {content}
+        </pre>
       </div>
     );
   }
   if (event.kind === "diff") {
-    return <DiffItem content={content} ts={ts} agent={event.agent} expanded={effectiveExpanded} onToggle={() => setExpanded((v) => !v)} />;
+    return (
+      <DiffItem
+        content={content}
+        ts={ts}
+        agent={event.agent}
+        expanded={effectiveExpanded}
+        onToggle={() => setExpanded((v) => !v)}
+      />
+    );
   }
   if (event.kind === "artifact_ref") {
     return <ArtifactTextItem ts={ts} agent={event.agent} content={content} payload={event.payload} />;
   }
   // plain text
   return (
-    <div style={{ background: "#fff", border: "1px solid #eee", padding: 8, borderRadius: 4 }}>
-      <div style={{ fontSize: 11, color: "#666", marginBottom: 4 }}>{ts} · <strong>{event.agent}</strong></div>
-      <div style={{ fontSize: 14 }}>
+    <div
+      style={{
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        padding: "8px 12px",
+        borderRadius: "var(--radius)",
+      }}
+    >
+      <div className="muted mono" style={{ fontSize: "var(--text-small)", marginBottom: 4 }}>
+        {ts} · <strong style={{ color: "var(--text-dim)" }}>{event.agent}</strong>
+      </div>
+      <div className="markdown" style={{ fontSize: "var(--text-body)", lineHeight: 1.6 }}>
         <ReactMarkdown>{content}</ReactMarkdown>
       </div>
     </div>
@@ -128,33 +182,67 @@ function DiffItem({
   useEffect(() => {
     if (!expanded) return;
     let cancelled = false;
-    getHighlighter().then((h) => {
-      if (cancelled) return;
-      const out = h.codeToHtml(content, { lang: highlightLang, theme: "github-light" });
-      setHtml(out);
-    }).catch(() => {});
-    return () => { cancelled = true; };
+    getHighlighter()
+      .then((h) => {
+        if (cancelled) return;
+        const out = h.codeToHtml(content, { lang: highlightLang, theme: shikiTheme() });
+        setHtml(out);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [expanded, content, highlightLang]);
 
   const stats = content.match(/@@.*@@/g)?.length ?? 0;
+  const { t, tCount } = useT();
   return (
-    <div style={{ background: "#f8f8f8", border: "1px solid #ddd", borderRadius: 4 }}>
+    <div
+      style={{
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius)",
+        overflow: "hidden",
+      }}
+    >
       <button
         onClick={onToggle}
-        style={{ width: "100%", textAlign: "left", padding: 6, background: "none", border: "none", cursor: "pointer" }}
+        className="btn btn-ghost"
+        style={{
+          width: "100%",
+          textAlign: "left",
+          justifyContent: "flex-start",
+          padding: "6px 12px",
+          borderRadius: 0,
+          color: "var(--text-dim)",
+        }}
       >
-        {expanded ? "▼" : "▶"} diff · {ts} · {agent}{label ? ` · ${label}` : ""}{stats > 0 ? ` · ${stats} hunk(s)` : ""}
+        <span className="mono muted">{expanded ? "▼" : "▶"}</span>
+        <span>{t("progress.diff")} · {ts} · {agent}</span>
+        {label && <span className="muted"> · {label}</span>}
+        {stats > 0 && <span className="muted"> · {tCount("progress.hunks", stats)}</span>}
       </button>
-      {expanded && (
-        html ? (
+      {expanded &&
+        (html ? (
           <div
-            style={{ padding: 8, margin: 0, overflowX: "auto", fontSize: 12 }}
+            className="mono"
+            style={{
+              padding: 8,
+              margin: 0,
+              overflowX: "auto",
+              fontSize: "var(--text-mono)",
+              borderTop: "1px solid var(--border-soft)",
+            }}
             dangerouslySetInnerHTML={{ __html: html }}
           />
         ) : (
-          <pre style={{ padding: 8, margin: 0, overflowX: "auto", fontSize: 12 }}>{content}</pre>
-        )
-      )}
+          <pre
+            className="mono"
+            style={{ padding: 8, margin: 0, overflowX: "auto", fontSize: "var(--text-mono)" }}
+          >
+            {content}
+          </pre>
+        ))}
     </div>
   );
 }
@@ -170,11 +258,21 @@ function ArtifactTextItem({
   content: string;
   payload: { [k: string]: unknown };
 }) {
-  const artifact = (payload.artifact as ArtifactMeta | undefined) ?? { path: content, kind: "file" };
+  const artifact = (payload.artifact as ArtifactMeta | undefined) ?? {
+    path: content,
+    kind: "file",
+  };
   return (
-    <div style={{ background: "#fff", border: "1px solid #eee", padding: 8, borderRadius: 4 }}>
-      <div style={{ fontSize: 11, color: "#666", marginBottom: 4 }}>
-        {ts} · <strong>{agent}</strong>
+    <div
+      style={{
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        padding: "8px 12px",
+        borderRadius: "var(--radius)",
+      }}
+    >
+      <div className="muted mono" style={{ fontSize: "var(--text-small)", marginBottom: 6 }}>
+        {ts} · <strong style={{ color: "var(--text-dim)" }}>{agent}</strong>
       </div>
       <ArtifactCard artifact={artifact} description={content} />
     </div>

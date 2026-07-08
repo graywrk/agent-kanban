@@ -1,6 +1,8 @@
 import { useState } from "react";
 import type { Task, TaskStatus } from "../types";
 import { TaskCard } from "./TaskCard";
+import { STATUS_META } from "../statusMeta";
+import { useT } from "../i18n.tsx";
 
 interface Props {
   status: TaskStatus;
@@ -10,18 +12,10 @@ interface Props {
   onOpen: (taskId: number) => void;
 }
 
-const LABELS: Record<TaskStatus, string> = {
-  todo: "TODO",
-  ready: "READY",
-  in_progress: "ACTIVE",
-  review: "REVIEW",
-  done: "DONE",
-  blocked: "BLOCKED",
-  cancelled: "CANCELLED",
-};
-
 export function Column({ status, tasks, lastProgress, onDrop, onOpen }: Props) {
+  const { t } = useT();
   const [over, setOver] = useState(false);
+  const meta = STATUS_META[status];
   return (
     <div
       onDragOver={(e) => {
@@ -37,29 +31,61 @@ export function Column({ status, tasks, lastProgress, onDrop, onOpen }: Props) {
       }}
       style={{
         flex: "1 1 0",
-        minWidth: 220,
-        background: over ? "#f0fdf4" : "#f7f7f7",
-        borderRadius: 8,
-        padding: 10,
+        minWidth: 230,
+        maxWidth: 320,
+        background: "var(--surface)",
+        border: `1px solid ${over ? "var(--accent)" : "var(--border)"}`,
+        borderRadius: "var(--radius-lg)",
+        padding: 12,
         display: "flex",
         flexDirection: "column",
         gap: 8,
+        transition: "border-color var(--transition)",
       }}
     >
-      <div style={{ fontWeight: 700, textTransform: "uppercase", fontSize: 13, letterSpacing: 1 }}>
-        {LABELS[status]} ({tasks.length})
-      </div>
-      {tasks.map((t) => (
-        <div
-          key={t.id}
-          draggable
-          onDragStart={(e) => e.dataTransfer.setData("text/plain", String(t.id))}
-          onClick={() => onOpen(t.id)}
-          style={{ cursor: "pointer" }}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 2,
+        }}
+      >
+        <span className="eyebrow">{t(meta.labelKey)}</span>
+        <span
+          className="mono"
+          style={{ color: "var(--text-mute)", fontSize: "var(--text-small)" }}
         >
-          <TaskCard task={t} lastProgressAt={lastProgress[t.id]} />
-        </div>
-      ))}
+          {tasks.length}
+        </span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {tasks.map((tk) => (
+          <div
+            key={tk.id}
+            draggable
+            onDragStart={(e) => e.dataTransfer.setData("text/plain", String(tk.id))}
+            onClick={() => onOpen(tk.id)}
+            style={{ cursor: "pointer" }}
+          >
+            <TaskCard task={tk} lastProgressAt={lastProgress[tk.id]} />
+          </div>
+        ))}
+        {tasks.length === 0 && (
+          <div
+            style={{
+              padding: "18px 8px",
+              textAlign: "center",
+              color: "var(--text-mute)",
+              fontSize: "var(--text-small)",
+              border: "1px dashed var(--border)",
+              borderRadius: "var(--radius)",
+            }}
+          >
+            {t("column.empty")}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

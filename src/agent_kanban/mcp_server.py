@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from agent_kanban.auth import Principal, _resolve_bearer
 from agent_kanban.config import get_settings
@@ -154,6 +155,7 @@ def _task_to_dict(task) -> dict:
         "tags": task.tags,
         "claimed_by": task.claimed_by,
         "claimed_at": task.claimed_at.isoformat() + "Z" if task.claimed_at else None,
+        "assigned_to": task.assigned_to,
         "project_id": task.project_id,
         "sort_order": task.sort_order,
         "repo_path": task.repo_path,
@@ -173,13 +175,28 @@ def create_mcp() -> FastMCP:
     (lazily-created, single-use) session manager. Callers that serve HTTP
     should create one instance per app so the session manager lifecycle is not
     shared across multiple app lifespans.
+
+    The MCP streamable-HTTP transport enables DNS-rebinding protection by
+    default (localhost only). We override the allow-lists with the configured
+    MCP_ALLOWED_HOSTS / MCP_ALLOWED_ORIGINS plus the PUBLIC_URL hostname so a
+    public deployment (e.g. kanban.example.com) is reachable by agents without
+    hitting "Invalid Host header".
     """
     # `streamable_http_path="/"` makes the inner Starlette route resolve at "/"
     # so that mounting the app under "/mcp" in server.py yields a canonical
     # endpoint of "/mcp/" (with "/mcp" 307-redirecting to it). Without this the
     # inner default route "/mcp" would combine with the "/mcp" mount prefix to
     # produce a doubled "/mcp/mcp" path.
-    mcp = FastMCP("agent-kanban", streamable_http_path="/")
+    s = get_settings()
+    security = TransportSecuritySettings(
+        allowed_hosts=s.effective_mcp_allowed_hosts(),
+        allowed_origins=s.effective_mcp_allowed_origins(),
+    )
+    mcp = FastMCP(
+        "agent-kanban",
+        streamable_http_path="/",
+        transport_security=security,
+    )
 
     @mcp.tool()
     async def get_next_task(
@@ -194,11 +211,16 @@ def create_mcp() -> FastMCP:
           tags_all: task must have all of these tags
           exclude_tags: task must have none of these tags
 
+        Only tasks that are unassigned OR assigned to the calling agent are
+        returned — tasks reserved for other agents are invisible here.
+
         Does NOT claim the task. Call claim_task to take it.
         """
-        await _require_any_principal()
+        principal = await _require_any_principal()
         async with session() as s:
-            task = await svc_get_next_task(s, tags_any, tags_all, exclude_tags)
+            task = await svc_get_next_task(
+                s, tags_any, tags_all, exclude_tags, agent=principal.agent_name
+            )
             if task is None:
                 return None
             return _task_to_dict(task)
@@ -222,11 +244,15 @@ def create_mcp() -> FastMCP:
     async def list_tasks(
         status: Optional[str] = None, tags_any: Optional[list[str]] = None
     ) -> list[dict]:
-        """List tasks, optionally filtered by status and/or tags. Does not claim."""
-        await _require_any_principal()
+        """List tasks, optionally filtered by status and/or tags. Does not claim.
+
+        Only tasks that are unassigned OR assigned to the calling agent are
+        returned — tasks reserved for other agents are hidden.
+        """
+        principal = await _require_any_principal()
         status_enum = TaskStatus(status) if status else None
         async with session() as s:
-            tasks = await svc_list_tasks(s, status_enum, tags_any)
+            tasks = await svc_list_tasks(s, status_enum, tags_any, agent=principal.agent_name)
             return [_task_to_dict(t) for t in tasks]
 
     @mcp.tool()

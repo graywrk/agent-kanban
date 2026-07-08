@@ -52,6 +52,11 @@ class Task(SQLModel, table=True):
     tags: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     claimed_by: Optional[str] = Field(default=None, index=True)
     claimed_at: Optional[datetime] = None
+    # Hard assignment: an operator reserves a task for a specific agent. The
+    # task is then visible (in get_next_task / list_tasks) and claimable only by
+    # that agent. Other agents don't see it. Set/cleared via REST PATCH by a
+    # human operator — agents themselves cannot assign.
+    assigned_to: Optional[str] = Field(default=None, index=True)
     sort_order: float = Field(default=0.0)
     # Phase 3 fields (present now so migrations are stable; unused in Phase 1)
     repo_path: Optional[str] = None

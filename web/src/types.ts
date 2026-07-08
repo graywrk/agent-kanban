@@ -16,6 +16,7 @@ export interface Task {
   tags: string[];
   claimed_by: string | null;
   claimed_at: string | null;
+  assigned_to: string | null;
   sort_order: number;
   branch: string | null;
   pr_url: string | null;

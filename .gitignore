@@ -12,3 +12,11 @@ web/node_modules/
 web/dist/
 .coverage
 htmlcov/
+
+# Local-only screenshots / browser-tool artifacts (keep docs/screenshots/ tracked)
+/.playwright-mcp/
+/*.png
+
+# Deployment-specific compose (private hostnames, prod secrets) — not for OSS
+/docker-compose.hiplet.yml
+/docker-compose.*.yml

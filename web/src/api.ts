@@ -26,6 +26,7 @@ export const api = {
     status?: TaskStatus;
     repo_path?: string;
     base_branch?: string;
+    assigned_to?: string | null;
   }): Promise<Task> {
     return j(
       await fetch(`${BASE}/tasks`, {
@@ -38,7 +39,9 @@ export const api = {
   },
   async updateTask(
     id: number,
-    patch: Partial<Pick<Task, "title" | "description" | "tags" | "status" | "sort_order">>
+    patch: Partial<Pick<Task, "title" | "description" | "tags" | "status" | "sort_order">> & {
+      assigned_to?: string | null;
+    }
   ): Promise<Task> {
     return j(
       await fetch(`${BASE}/tasks/${id}`, {
