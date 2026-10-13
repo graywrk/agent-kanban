@@ -4,7 +4,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agent_kanban.models import ProgressKind, TaskStatus
+from agent_kanban.models import ProgressKind, TaskPriority, TaskStatus
 
 
 class ReadBase(BaseModel):
@@ -21,6 +21,14 @@ class ReadBase(BaseModel):
 # ---- Project ----
 class ProjectCreate(BaseModel):
     name: str
+    repo_path: Optional[str] = None
+    default_branch: Optional[str] = None
+
+
+class ProjectUpdate(BaseModel):
+    """Partial project update. Uses exclude_unset on the caller side so
+    "not sent" is distinguished from "set to null"."""
+    name: Optional[str] = None
     repo_path: Optional[str] = None
     default_branch: Optional[str] = None
 
@@ -45,6 +53,13 @@ class TaskCreate(BaseModel):
     base_branch: Optional[str] = None
     # Reserve this task for a specific agent (hard assignment). Null = open to all.
     assigned_to: Optional[str] = None
+    # Soft agent preference: reorders get_next_task for the named agent, never
+    # hides the task from others.
+    preferred_model: Optional[str] = None
+    priority: TaskPriority = TaskPriority.MEDIUM
+    # Who filed the task. REST always overrides this server-side with the
+    # authenticated principal; MCP passes the verified agent_name.
+    created_by: Optional[str] = None
 
 
 class TaskUpdate(BaseModel):
@@ -59,6 +74,8 @@ class TaskUpdate(BaseModel):
     pr_status: Optional[str] = None
     repo_path: Optional[str] = None
     base_branch: Optional[str] = None
+    preferred_model: Optional[str] = None
+    priority: Optional[TaskPriority] = None
     # Assign / re-assign / unassign. Use model_dump(exclude_unset=True) on the
     # caller side to distinguish "not sent" from "set to null" (unassign).
     assigned_to: Optional[str] = None
@@ -74,6 +91,9 @@ class TaskRead(ReadBase):
     claimed_by: Optional[str] = None
     claimed_at: Optional[datetime] = None
     assigned_to: Optional[str] = None
+    preferred_model: Optional[str] = None
+    priority: TaskPriority
+    created_by: Optional[str] = None
     sort_order: float
     repo_path: Optional[str] = None
     base_branch: Optional[str] = None

@@ -1,5 +1,6 @@
 import type { Task } from "../types";
-import { useT } from "../i18n.tsx";
+import { useT, localeBcp47, type Locale } from "../i18n.tsx";
+import { PRIORITY_META } from "../priorityMeta";
 
 const LIVE_WINDOW_MS = 30_000;
 
@@ -10,6 +11,14 @@ export function prStatusLabel(status: string | null | undefined, t: (k: string) 
   return t("pr.open");
 }
 
+/** Short created date, e.g. "12 okt" / "Oct 12". */
+export function createdDate(iso: string, locale: Locale): string {
+  return new Date(iso).toLocaleDateString(localeBcp47(locale), {
+    month: "short",
+    day: "numeric",
+  });
+}
+
 export function TaskCard({
   task,
   lastProgressAt,
@@ -17,10 +26,12 @@ export function TaskCard({
   task: Task;
   lastProgressAt?: string;
 }) {
-  const { t } = useT();
+  const { t, locale } = useT();
   const isLive = lastProgressAt
     ? Date.now() - new Date(lastProgressAt).getTime() < LIVE_WINDOW_MS
     : false;
+  const prioMeta = PRIORITY_META[task.priority];
+  const showPriority = task.priority !== "medium";
   return (
     <div
       style={{
@@ -52,7 +63,44 @@ export function TaskCard({
         >
           {task.title}
         </span>
+        <span
+          className="mono"
+          title={t("task.createdTooltip", { date: createdDate(task.created_at, locale) })}
+          style={{ color: "var(--text-mute)", fontSize: "var(--text-small)", flexShrink: 0 }}
+        >
+          {createdDate(task.created_at, locale)}
+        </span>
       </div>
+
+      {(showPriority || task.preferred_model) && (
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 4 }}>
+          {showPriority && (
+            <span
+              className={`badge badge-${prioMeta.badge}`}
+              title={t(prioMeta.labelKey)}
+              style={{ padding: "1px 7px", fontSize: "var(--text-small)" }}
+            >
+              {t(prioMeta.labelKey)}
+            </span>
+          )}
+          {task.preferred_model && (
+            <span
+              className="mono"
+              title={t("task.preferredTooltip", { agent: task.preferred_model })}
+              style={{
+                color: "var(--text-dim)",
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                padding: "1px 7px",
+                borderRadius: 999,
+                fontSize: "var(--text-small)",
+              }}
+            >
+              ◇ {task.preferred_model}
+            </span>
+          )}
+        </div>
+      )}
 
       {task.tags.length > 0 && (
         <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 4 }}>

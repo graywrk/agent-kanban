@@ -1,20 +1,22 @@
 import { useEffect, useState } from "react";
 import { api, subscribeWebSocket } from "../api";
 import type { WSSubscription } from "../api";
-import type { Comment, ProgressEvent, Task } from "../types";
+import type { Comment, ProgressEvent, Project, Task, TaskPriority } from "../types";
 import { ProgressFeed } from "../components/ProgressFeed";
 import { CommentList } from "../components/CommentList";
 import { STATUS_META } from "../statusMeta";
-import { useT } from "../i18n.tsx";
+import { PRIORITY_META, PRIORITY_ORDER } from "../priorityMeta";
+import { useT, localeBcp47 } from "../i18n.tsx";
 import { prStatusLabel } from "../components/TaskCard";
 
 export function CardDetail({ taskId, onBack }: { taskId: number; onBack: () => void }) {
-  const { t } = useT();
+  const { t, locale } = useT();
   const [task, setTask] = useState<Task | null>(null);
   const [progress, setProgress] = useState<ProgressEvent[]>([]);
   const [comments, setComments] = useState<Comment[]>([]);
   const [actionError, setActionError] = useState<string | null>(null);
   const [agents, setAgents] = useState<string[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
 
   async function refresh() {
     setTask(await api.getTask(taskId));
@@ -45,6 +47,10 @@ export function CardDetail({ taskId, onBack }: { taskId: number; onBack: () => v
       .listTokens()
       .then((tokens) => setAgents([...new Set(tokens.map((tk) => tk.agent_name))].sort()))
       .catch(() => setAgents([]));
+    api
+      .listProjects()
+      .then(setProjects)
+      .catch(() => setProjects([]));
   }, []);
 
   if (!task) {
@@ -79,6 +85,23 @@ export function CardDetail({ taskId, onBack }: { taskId: number; onBack: () => v
           <span className="badge-dot" />
           {t(meta.labelKey)}
         </span>
+        {task.priority !== "medium" && (
+          <span className={`badge badge-${PRIORITY_META[task.priority].badge}`}>
+            {t(PRIORITY_META[task.priority].labelKey)}
+          </span>
+        )}
+        {task.created_at && (
+          <span className="muted" style={{ fontSize: "var(--text-small)" }}>
+            {t("card.created")} {new Date(task.created_at).toLocaleString(localeBcp47(locale), {
+              year: "numeric",
+              month: "short",
+              day: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+            {task.created_by ? ` · ${t("card.createdBy", { name: task.created_by })}` : ""}
+          </span>
+        )}
         {task.assigned_to && (
           <span
             className="mono"
@@ -180,6 +203,103 @@ export function CardDetail({ taskId, onBack }: { taskId: number; onBack: () => v
                 ))}
               </select>
             </div>
+          </div>
+
+          {/* Priority — drives get_next_task ordering (critical first). */}
+          <div style={{ marginTop: 16 }}>
+            <label className="eyebrow" style={{ display: "block", marginBottom: 6 }}>
+              {t("card.priority")}
+            </label>
+            <select
+              className="input"
+              value={task.priority}
+              onChange={async (e) => {
+                setActionError(null);
+                try {
+                  await api.updateTask(taskId, {
+                    priority: e.target.value as TaskPriority,
+                  });
+                  refresh();
+                } catch (err) {
+                  setActionError(
+                    err instanceof Error ? err.message : t("card.error.update")
+                  );
+                }
+              }}
+              style={{ width: "auto", flex: 1 }}
+            >
+              {PRIORITY_ORDER.map((p) => (
+                <option key={p} value={p}>
+                  {t(PRIORITY_META[p].labelKey)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Preferred model — soft hint, reorders get_next_task for that
+              agent but never hides the task from the others. */}
+          <div style={{ marginTop: 16 }}>
+            <label className="eyebrow" style={{ display: "block", marginBottom: 6 }}>
+              {t("card.preferredModel")}
+            </label>
+            <select
+              className="input mono"
+              value={task.preferred_model ?? ""}
+              onChange={async (e) => {
+                setActionError(null);
+                try {
+                  await api.updateTask(taskId, {
+                    preferred_model: e.target.value || null,
+                  });
+                  refresh();
+                } catch (err) {
+                  setActionError(
+                    err instanceof Error ? err.message : t("card.error.update")
+                  );
+                }
+              }}
+              title={t("card.preferredTooltip")}
+              style={{ width: "auto", flex: 1 }}
+            >
+              <option value="">{t("card.preferredNone")}</option>
+              {agents.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Project grouping. */}
+          <div style={{ marginTop: 16 }}>
+            <label className="eyebrow" style={{ display: "block", marginBottom: 6 }}>
+              {t("card.project")}
+            </label>
+            <select
+              className="input"
+              value={task.project_id ?? ""}
+              onChange={async (e) => {
+                setActionError(null);
+                try {
+                  await api.updateTask(taskId, {
+                    project_id: e.target.value ? Number(e.target.value) : null,
+                  });
+                  refresh();
+                } catch (err) {
+                  setActionError(
+                    err instanceof Error ? err.message : t("card.error.update")
+                  );
+                }
+              }}
+              style={{ width: "auto", flex: 1 }}
+            >
+              <option value="">{t("card.projectNone")}</option>
+              {projects.map((p) => (
+                <option key={p.id} value={String(p.id)}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div style={{ marginTop: 16 }}>

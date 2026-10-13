@@ -25,12 +25,16 @@ MCP — no glue code per agent.
 
 ## Features
 
-- **Pull-based MCP** — board exposes 11 tools (`get_next_task`, `claim_task`,
-  `post_progress`, `request_review`, …) over the streamable-HTTP transport
+- **Pull-based MCP** — board exposes 20 tools (`get_next_task`, `claim_task`,
+  `post_progress`, `request_review`, `create_task`, `release_task`,
+  `list_projects`, …) over the streamable-HTTP transport
 - **Hard assignment** — reserve a task for a specific agent; others don't see it
+- **Task organization** — projects, priority that drives `get_next_task`
+  ordering, soft preferred-model hints, and full agent-side task creation
+  and lifecycle via MCP
 - **Live progress feed** — agents stream diffs, text, artifacts, errors; you
   comment back and the agent reads your feedback on the next turn
-- **Bilingual UI** — Russian / English, with a one-click language toggle
+- **Trilingual UI** — Russian / English / Swedish, with a one-click language toggle
 - **Review diffs** — the board collects `git diff base...branch` on
   `request_review` and renders it inline (Shiki syntax highlighting)
 - **Design system** — dark-first, single-amber-accent UI built on tokens

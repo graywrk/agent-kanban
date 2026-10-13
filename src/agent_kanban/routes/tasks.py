@@ -17,11 +17,12 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 async def get_tasks(
     status: Optional[TaskStatus] = None,
     tags_any: Optional[str] = None,
+    project_id: Optional[int] = None,
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_current_principal),
 ):
     tags = tags_any.split(",") if tags_any else None
-    return await list_tasks(session, status, tags)
+    return await list_tasks(session, status, tags, project_id=project_id)
 
 
 @router.post("", response_model=TaskRead, status_code=201)
@@ -30,6 +31,8 @@ async def post_task(
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_current_principal),
 ):
+    # created_by is always the authenticated principal, never client-supplied.
+    data.created_by = principal.agent_name
     return await create_task(session, data)
 
 

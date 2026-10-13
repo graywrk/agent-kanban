@@ -267,13 +267,22 @@ async def test_post_artifact_rejects_wrong_agent(session: AsyncSession):
 
 @pytest.mark.asyncio
 async def test_tools_list_core_tools_registered():
-    """Sanity: all core MCP tools (11) are registered with FastMCP."""
+    """Sanity: all core MCP tools (20) are registered with FastMCP."""
     tools = await mcp.list_tools()
     names = {t.name for t in tools}
     expected = {
         "get_next_task",
         "claim_task",
         "list_tasks",
+        "get_task",
+        "create_task",
+        "update_task",
+        "release_task",
+        "cancel_task",
+        "list_projects",
+        "create_project",
+        "list_progress",
+        "list_artifacts",
         "post_progress",
         "complete_task",
         "request_review",
@@ -284,7 +293,7 @@ async def test_tools_list_core_tools_registered():
         "set_task_pr",
     }
     assert expected.issubset(names), f"missing: {expected - names}"
-    assert len(names) == 11, f"expected 11 tools, got {len(names)}: {names}"
+    assert len(names) == 20, f"expected 20 tools, got {len(names)}: {names}"
 
 
 @pytest.mark.asyncio

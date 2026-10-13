@@ -1,16 +1,17 @@
 /**
  * Tiny i18n engine — no external deps.
  *
- * Two locales (ru/en), flat dot-namespace keys, `{param}` interpolation,
+ * Three locales (ru/en/sv), flat dot-namespace keys, `{param}` interpolation,
  * and a Russian-plural helper for the one plural case in the UI (diff hunks).
  * A subscribe/store layer in i18n.tsx wires this into React.
  */
 
-export type Locale = "ru" | "en";
+export type Locale = "ru" | "en" | "sv";
 
 export const LANGS: { code: Locale; label: string }[] = [
   { code: "ru", label: "RU" },
   { code: "en", label: "EN" },
+  { code: "sv", label: "SV" },
 ];
 
 // ── Message catalogs ────────────────────────────────────────────────────────
@@ -65,6 +66,8 @@ const en: Catalog = {
   "board.newTask": "+ New task",
   "board.tip": "Drag cards between columns. Drop into {ready} to make them available to agents via MCP.",
   "board.tipReady": "READY",
+  "board.allProjects": "All projects",
+  "board.projectFilterTooltip": "Show tasks for one project",
 
   // column
   "column.empty": "empty",
@@ -82,6 +85,8 @@ const en: Catalog = {
   "task.live": "live",
   "task.reservedTooltip": "Reserved for {agent}",
   "task.claimedBy": "claimed by {name}",
+  "task.createdTooltip": "Created {date}",
+  "task.preferredTooltip": "Preferred agent: {agent}",
   "task.pr": "PR #{num}",
   "task.prFallback": "pr",
 
@@ -90,6 +95,12 @@ const en: Catalog = {
   "pr.closed": "closed",
   "pr.open": "open",
 
+  // priority
+  "priority.critical": "Critical",
+  "priority.high": "High",
+  "priority.medium": "Medium",
+  "priority.low": "Low",
+
   // card detail
   "card.back": "← Back to board",
   "card.taskPrefix": "Task #{id}",
@@ -97,9 +108,17 @@ const en: Catalog = {
   "card.section.progress": "Progress",
   "card.section.details": "Details",
   "card.noDescription": "No description",
+  "card.created": "Created",
+  "card.createdBy": "by {name}",
   "card.assignedTo": "Assigned to",
   "card.assignAnyone": "Anyone (unassigned)",
   "card.assignTooltip": "Reserve this task for a specific agent. Others won't see or claim it.",
+  "card.priority": "Priority",
+  "card.preferredModel": "Preferred model",
+  "card.preferredNone": "No preference",
+  "card.preferredTooltip": "Soft hint: this agent sees the task first in get_next_task, others can still claim it.",
+  "card.project": "Project",
+  "card.projectNone": "No project",
   "card.reopenReady": "Reopen → ready",
   "card.cancel": "Cancel",
   "card.error.assign": "Failed to assign task",
@@ -126,6 +145,12 @@ const en: Catalog = {
   "newTask.descPlaceholder": "Markdown supported",
   "newTask.tagsLabel": "Tags",
   "newTask.tagsPlaceholder": "comma-separated",
+  "newTask.projectLabel": "Project (optional)",
+  "newTask.projectNone": "No project",
+  "newTask.priorityLabel": "Priority",
+  "newTask.preferredLabel": "Preferred model (optional)",
+  "newTask.preferredNone": "No preference",
+  "newTask.preferredTooltip": "Soft hint: this agent sees the task first, others can still claim it.",
   "newTask.repoLabel": "Repo path (optional)",
   "newTask.baseLabel": "Base branch (optional)",
   "newTask.assignLabel": "Assign to (optional)",
@@ -145,7 +170,17 @@ const en: Catalog = {
   "admin.eyebrow": "Administration",
   "admin.title": "Tokens & users",
   "admin.tokensHeading": "Tokens (agents)",
+  "admin.projectsHeading": "Projects",
   "admin.usersHeading": "Users",
+  "admin.projectNamePlaceholder": "project name",
+  "admin.projectRepoPlaceholder": "repo path (optional)",
+  "admin.projectBranchPlaceholder": "default branch (optional)",
+  "admin.col.projectName": "Project",
+  "admin.col.projectRepo": "Repo path",
+  "admin.col.projectBranch": "Default branch",
+  "admin.noProjects": "No projects yet.",
+  "admin.error.addProject": "Failed to add project",
+  "admin.error.updateProject": "Failed to update project",
   "admin.banner": "Copy now — shown once",
   "admin.agentPlaceholder": "agent_name (e.g. codex)",
   "admin.descPlaceholder": "description (optional)",
@@ -225,6 +260,8 @@ const ru: Catalog = {
   "board.tip":
     "Перетаскивайте карточки между колонками. Бросьте в {ready}, чтобы сделать их доступными агентам через MCP.",
   "board.tipReady": "READY",
+  "board.allProjects": "Все проекты",
+  "board.projectFilterTooltip": "Показать задачи одного проекта",
 
   // column
   "column.empty": "пусто",
@@ -242,6 +279,8 @@ const ru: Catalog = {
   "task.live": "активна",
   "task.reservedTooltip": "Зарезервировано для {agent}",
   "task.claimedBy": "взял {name}",
+  "task.createdTooltip": "Создано {date}",
+  "task.preferredTooltip": "Предпочтительный агент: {agent}",
   "task.pr": "PR #{num}",
   "task.prFallback": "pr",
 
@@ -250,6 +289,12 @@ const ru: Catalog = {
   "pr.closed": "закрыт",
   "pr.open": "открыт",
 
+  // priority
+  "priority.critical": "Критично",
+  "priority.high": "Высокий",
+  "priority.medium": "Средний",
+  "priority.low": "Низкий",
+
   // card detail
   "card.back": "← К доске",
   "card.taskPrefix": "Задача #{id}",
@@ -257,10 +302,19 @@ const ru: Catalog = {
   "card.section.progress": "Прогресс",
   "card.section.details": "Детали",
   "card.noDescription": "Нет описания",
+  "card.created": "Создано",
+  "card.createdBy": "автор {name}",
   "card.assignedTo": "Назначено",
   "card.assignAnyone": "Кому угодно (не назначено)",
   "card.assignTooltip":
     "Зарезервировать задачу за конкретным агентом. Другие не увидят её и не смогут взять.",
+  "card.priority": "Приоритет",
+  "card.preferredModel": "Предпочтительная модель",
+  "card.preferredNone": "Без предпочтения",
+  "card.preferredTooltip":
+    "Мягкий намёк: этот агент увидит задачу первой в get_next_task, остальные всё ещё могут её взять.",
+  "card.project": "Проект",
+  "card.projectNone": "Без проекта",
   "card.reopenReady": "Переоткрыть → ready",
   "card.cancel": "Отменить",
   "card.error.assign": "Не удалось назначить задачу",
@@ -287,6 +341,13 @@ const ru: Catalog = {
   "newTask.descPlaceholder": "Поддерживается Markdown",
   "newTask.tagsLabel": "Теги",
   "newTask.tagsPlaceholder": "через запятую",
+  "newTask.projectLabel": "Проект (опц.)",
+  "newTask.projectNone": "Без проекта",
+  "newTask.priorityLabel": "Приоритет",
+  "newTask.preferredLabel": "Предпочтительная модель (опц.)",
+  "newTask.preferredNone": "Без предпочтения",
+  "newTask.preferredTooltip":
+    "Мягкий намёк: этот агент увидит задачу первой, остальные всё ещё могут её взять.",
   "newTask.repoLabel": "Путь к репозиторию (опц.)",
   "newTask.baseLabel": "Базовая ветка (опц.)",
   "newTask.assignLabel": "Назначить (опц.)",
@@ -307,7 +368,17 @@ const ru: Catalog = {
   "admin.eyebrow": "Администрирование",
   "admin.title": "Токены и пользователи",
   "admin.tokensHeading": "Токены (агенты)",
+  "admin.projectsHeading": "Проекты",
   "admin.usersHeading": "Пользователи",
+  "admin.projectNamePlaceholder": "название проекта",
+  "admin.projectRepoPlaceholder": "путь к репозиторию (опц.)",
+  "admin.projectBranchPlaceholder": "ветка по умолчанию (опц.)",
+  "admin.col.projectName": "Проект",
+  "admin.col.projectRepo": "Путь к репозиторию",
+  "admin.col.projectBranch": "Ветка по умолчанию",
+  "admin.noProjects": "Проектов пока нет.",
+  "admin.error.addProject": "Не удалось добавить проект",
+  "admin.error.updateProject": "Не удалось обновить проект",
   "admin.banner": "Скопируйте сейчас — показан один раз",
   "admin.agentPlaceholder": "agent_name (напр. codex)",
   "admin.descPlaceholder": "описание (опц.)",
@@ -342,7 +413,205 @@ const ru: Catalog = {
   "admin.error.adminFlag": "Не удалось изменить права администратора",
 };
 
-const CATALOGS: Record<Locale, Catalog> = { en, ru };
+const sv: Catalog = {
+  // common
+  "common.loading": "Laddar…",
+  "common.backToBoard": "← Tillbaka till tavlan",
+  "common.cancel": "Avbryt",
+  "common.send": "Skicka",
+  "common.add": "Lägg till",
+  "common.edit": "Ändra",
+  "common.close": "Stäng",
+  "common.dismiss": "Dölj",
+  "common.copy": "Kopiera",
+  "common.copied": "Kopierat",
+  "common.never": "aldrig",
+  "common.empty": "tom",
+
+  // nav
+  "nav.admin": "Admin",
+  "nav.logout": "Logga ut",
+  "nav.theme.toLight": "Byt till ljust",
+  "nav.theme.toDark": "Byt till mörkt",
+  "nav.theme.toggle": "Byt tema",
+
+  // login
+  "login.eyebrow.setup": "Första starten",
+  "login.eyebrow.login": "Logga in",
+  "login.brand": "Agent Kanban",
+  "login.subtitle.setup": "Skapa administratörskontot för att komma igång.",
+  "login.subtitle.login": "Operatörskonsol för pull-baserade agenter.",
+  "login.usernameLabel": "Användarnamn",
+  "login.passwordLabel": "Lösenord",
+  "login.confirmLabel": "Upprepa lösenord",
+  "login.usernamePlaceholder": "användarnamn",
+  "login.error.shortPassword": "Lösenordet måste vara minst 8 tecken",
+  "login.error.mismatch": "Lösenorden är inte lika",
+  "login.error.failed": "Inloggningen misslyckades",
+  "login.button.setup": "Skapa administratör",
+  "login.button.login": "Logga in",
+
+  // board
+  "board.eyebrow": "Tavla",
+  "board.title": "Alla uppgifter",
+  "board.newTask": "+ Ny uppgift",
+  "board.tip":
+    "Dra kort mellan kolumnerna. Släpp i {ready} för att göra dem tillgängliga för agenter via MCP.",
+  "board.tipReady": "READY",
+  "board.allProjects": "Alla projekt",
+  "board.projectFilterTooltip": "Visa uppgifter för ett projekt",
+
+  // column
+  "column.empty": "tom",
+
+  // status labels
+  "status.todo": "Att göra",
+  "status.ready": "Klar",
+  "status.in_progress": "Pågår",
+  "status.review": "Granskning",
+  "status.done": "Klar",
+  "status.blocked": "Blockerad",
+  "status.cancelled": "Avbruten",
+
+  // task card
+  "task.live": "live",
+  "task.reservedTooltip": "Reserverad för {agent}",
+  "task.claimedBy": "tagen av {name}",
+  "task.createdTooltip": "Skapad {date}",
+  "task.preferredTooltip": "Föredragen agent: {agent}",
+  "task.pr": "PR #{num}",
+  "task.prFallback": "pr",
+
+  // pr status
+  "pr.merged": "sammanslagen",
+  "pr.closed": "stängd",
+  "pr.open": "öppen",
+
+  // priority
+  "priority.critical": "Kritisk",
+  "priority.high": "Hög",
+  "priority.medium": "Medium",
+  "priority.low": "Låg",
+
+  // card detail
+  "card.back": "← Tillbaka till tavlan",
+  "card.taskPrefix": "Uppgift #{id}",
+  "card.reservedTooltip": "Reserverad för den här agenten",
+  "card.section.progress": "Förlopp",
+  "card.section.details": "Detaljer",
+  "card.noDescription": "Ingen beskrivning",
+  "card.created": "Skapad",
+  "card.createdBy": "av {name}",
+  "card.assignedTo": "Tilldelad",
+  "card.assignAnyone": "Vem som helst (ej tilldelad)",
+  "card.assignTooltip":
+    "Reservera uppgiften för en specifik agent. Andra ser den inte och kan inte ta den.",
+  "card.priority": "Prioritet",
+  "card.preferredModel": "Föredragen modell",
+  "card.preferredNone": "Ingen preferens",
+  "card.preferredTooltip":
+    "Mjuk preferens: agenten ser uppgiften först i get_next_task, andra kan fortfarande ta den.",
+  "card.project": "Projekt",
+  "card.projectNone": "Inget projekt",
+  "card.reopenReady": "Öppna igen → ready",
+  "card.cancel": "Avbryt",
+  "card.error.assign": "Kunde inte tilldela uppgiften",
+  "card.error.update": "Kunde inte uppdatera uppgiften",
+
+  // comments
+  "comment.heading": "Kommentarer",
+  "comment.empty": "Inga kommentarer än.",
+  "comment.seen": "läst",
+  "comment.pending": "oläst",
+  "comment.inputPlaceholder": "Lämna en kommentar till agenten…",
+  "comment.statusAfter": "Status efter att kommentaren skickats",
+  "comment.toInProgress": "→ in_progress",
+  "comment.toReady": "→ ready",
+  "comment.sending": "Skickar…",
+  "comment.error": "Kunde inte skicka kommentaren",
+
+  // new task modal
+  "newTask.eyebrow": "Ny uppgift",
+  "newTask.title": "Skapa en uppgift",
+  "newTask.titleLabel": "Titel",
+  "newTask.titlePlaceholder": "Vad behöver göras?",
+  "newTask.descLabel": "Beskrivning",
+  "newTask.descPlaceholder": "Markdown stöds",
+  "newTask.tagsLabel": "Taggar",
+  "newTask.tagsPlaceholder": "kommaseparerade",
+  "newTask.projectLabel": "Projekt (valfritt)",
+  "newTask.projectNone": "Inget projekt",
+  "newTask.priorityLabel": "Prioritet",
+  "newTask.preferredLabel": "Föredragen modell (valfritt)",
+  "newTask.preferredNone": "Ingen preferens",
+  "newTask.preferredTooltip":
+    "Mjuk preferens: agenten ser uppgiften först, andra kan fortfarande ta den.",
+  "newTask.repoLabel": "Reposökväg (valfritt)",
+  "newTask.baseLabel": "Basbranch (valfritt)",
+  "newTask.assignLabel": "Tilldela (valfritt)",
+  "newTask.assignTooltip":
+    "Reservera uppgiften för en specifik agent. Andra ser den inte.",
+  "newTask.assignAnyone": "Vem som helst (ej tilldelad)",
+  "newTask.creating": "Skapar…",
+  "newTask.create": "Skapa uppgift",
+  "newTask.error": "Kunde inte skapa uppgiften",
+
+  // progress feed
+  "progress.collapseAll": "Fäll ihop alla diffar",
+  "progress.expandAll": "Fäll ut alla diffar",
+  "progress.diff": "diff",
+  "progress.hunks": "{count} block",
+
+  // admin
+  "admin.eyebrow": "Administration",
+  "admin.title": "Token och användare",
+  "admin.tokensHeading": "Token (agenter)",
+  "admin.projectsHeading": "Projekt",
+  "admin.usersHeading": "Användare",
+  "admin.projectNamePlaceholder": "projektnamn",
+  "admin.projectRepoPlaceholder": "reposökväg (valfritt)",
+  "admin.projectBranchPlaceholder": "standardbranch (valfritt)",
+  "admin.col.projectName": "Projekt",
+  "admin.col.projectRepo": "Reposökväg",
+  "admin.col.projectBranch": "Standardbranch",
+  "admin.noProjects": "Inga projekt än.",
+  "admin.error.addProject": "Kunde inte lägga till projektet",
+  "admin.error.updateProject": "Kunde inte uppdatera projektet",
+  "admin.banner": "Kopiera nu, visas en enda gång",
+  "admin.agentPlaceholder": "agent_name (t.ex. codex)",
+  "admin.descPlaceholder": "beskrivning (valfritt)",
+  "admin.mint": "Skapa",
+  "admin.col.agent": "Agent",
+  "admin.col.description": "Beskrivning",
+  "admin.col.created": "Skapad",
+  "admin.col.lastUsed": "Senast använt",
+  "admin.col.role": "Roll",
+  "admin.col.username": "Användarnamn",
+  "admin.noTokens": "Inga token än.",
+  "admin.revoke": "Upphör",
+  "admin.userPlaceholder": "användarnamn",
+  "admin.passPlaceholder": "lösenord",
+  "admin.admin": "admin",
+  "admin.role.admin": "admin",
+  "admin.role.user": "användare",
+  "admin.changePassBody":
+    "Byt lösenord, ange {your} nuvarande administratörslösenord och ett nytt lösenord (8+) för {name}.",
+  "admin.changePassYour": "ditt",
+  "admin.yourCurrentPass": "ditt nuvarande lösenord",
+  "admin.newPassFor": "nytt lösenord för {name}",
+  "admin.changePassword": "Byt lösenord",
+  "admin.promote": "Befordra till admin",
+  "admin.demote": "Nedgradera",
+  "admin.deleteUser": "Ta bort användaren",
+  "admin.error.mint": "Kunde inte skapa token",
+  "admin.error.revoke": "Kunde inte upphäva token",
+  "admin.error.addUser": "Kunde inte lägga till användaren",
+  "admin.error.removeUser": "Kunde inte ta bort användaren",
+  "admin.error.changePass": "Kunde inte byta lösenord",
+  "admin.error.adminFlag": "Kunde inte ändra administratörsrättigheterna",
+};
+
+const CATALOGS: Record<Locale, Catalog> = { en, ru, sv };
 
 // ── Store ───────────────────────────────────────────────────────────────────
 
@@ -355,12 +624,14 @@ const _listeners = new Set<(l: Locale) => void>();
 export function getInitialLocale(): Locale {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved === "ru" || saved === "en") return saved;
+    if (saved === "ru" || saved === "en" || saved === "sv") return saved;
   } catch {
     /* localStorage unavailable */
   }
-  if (typeof navigator !== "undefined" && navigator.language?.toLowerCase().startsWith("ru")) {
-    return "ru";
+  if (typeof navigator !== "undefined") {
+    const lang = navigator.language?.toLowerCase() ?? "";
+    if (lang.startsWith("ru")) return "ru";
+    if (lang.startsWith("sv")) return "sv";
   }
   return "en";
 }
@@ -425,5 +696,7 @@ export function tCount(key: string, count: number): string {
 
 /** Map our locale to a BCP-47 tag for Intl APIs (toLocaleString etc.). */
 export function localeBcp47(locale: Locale = _locale): string {
-  return locale === "ru" ? "ru-RU" : "en-US";
+  if (locale === "ru") return "ru-RU";
+  if (locale === "sv") return "sv-SE";
+  return "en-US";
 }

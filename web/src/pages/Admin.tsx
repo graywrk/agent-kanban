@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import { useT, localeBcp47 } from "../i18n.tsx";
+import { useT, localeBcp47, type Locale } from "../i18n.tsx";
+import type { Project } from "../types";
 
 interface TokenRow {
   id: number;
@@ -20,17 +21,21 @@ export function Admin({ onBack }: { onBack: () => void }) {
   const { t, locale } = useT();
   const [tokens, setTokens] = useState<TokenRow[]>([]);
   const [users, setUsers] = useState<UserRow[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [newTokenAgent, setNewTokenAgent] = useState("");
   const [newTokenDesc, setNewTokenDesc] = useState("");
   const [mintedToken, setMintedToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [newUser, setNewUser] = useState({ username: "", password: "", is_admin: false });
+  const [newProject, setNewProject] = useState({ name: "", repo_path: "", default_branch: "" });
   const [actionError, setActionError] = useState<string | null>(null);
   const [editingUserId, setEditingUserId] = useState<number | null>(null);
+  const [editingProjectId, setEditingProjectId] = useState<number | null>(null);
 
   async function refresh() {
     setTokens(await api.listTokens());
     setUsers(await api.listUsers());
+    setProjects(await api.listProjects().catch(() => []));
   }
   useEffect(() => {
     refresh();
@@ -77,6 +82,22 @@ export function Admin({ onBack }: { onBack: () => void }) {
       refresh();
     } catch (e) {
       setActionError(e instanceof Error ? e.message : t("admin.error.removeUser"));
+    }
+  }
+
+  async function addProject() {
+    if (!newProject.name.trim()) return;
+    setActionError(null);
+    try {
+      await api.createProject({
+        name: newProject.name,
+        ...(newProject.repo_path ? { repo_path: newProject.repo_path } : {}),
+        ...(newProject.default_branch ? { default_branch: newProject.default_branch } : {}),
+      });
+      setNewProject({ name: "", repo_path: "", default_branch: "" });
+      refresh();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : t("admin.error.addProject"));
     }
   }
 
@@ -199,6 +220,69 @@ export function Admin({ onBack }: { onBack: () => void }) {
         </div>
       </section>
 
+      {/* Projects */}
+      <section style={{ marginBottom: 32 }}>
+        <h3 style={{ marginBottom: 12 }}>{t("admin.projectsHeading")}</h3>
+        <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+          <input
+            className="input"
+            placeholder={t("admin.projectNamePlaceholder")}
+            value={newProject.name}
+            onChange={(e) => setNewProject({ ...newProject, name: e.target.value })}
+            style={{ flex: "1 1 160px" }}
+          />
+          <input
+            className="input mono"
+            placeholder={t("admin.projectRepoPlaceholder")}
+            value={newProject.repo_path}
+            onChange={(e) => setNewProject({ ...newProject, repo_path: e.target.value })}
+            style={{ flex: "1 1 220px" }}
+          />
+          <input
+            className="input mono"
+            placeholder={t("admin.projectBranchPlaceholder")}
+            value={newProject.default_branch}
+            onChange={(e) => setNewProject({ ...newProject, default_branch: e.target.value })}
+            style={{ flex: "1 1 120px" }}
+          />
+          <button className="btn btn-primary" onClick={addProject} disabled={!newProject.name.trim()}>
+            {t("common.add")}
+          </button>
+        </div>
+
+        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--text-small)" }}>
+            <thead>
+              <tr style={{ background: "var(--elevated)" }}>
+                <Th>{t("admin.col.projectName")}</Th>
+                <Th>{t("admin.col.projectRepo")}</Th>
+                <Th>{t("admin.col.projectBranch")}</Th>
+                <Th align="right"> </Th>
+              </tr>
+            </thead>
+            <tbody>
+              {projects.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="muted" style={{ padding: 14, textAlign: "center" }}>
+                    {t("admin.noProjects")}
+                  </td>
+                </tr>
+              )}
+              {projects.map((p) => (
+                <ProjectRow
+                  key={p.id}
+                  project={p}
+                  editing={editingProjectId === p.id}
+                  onToggleEdit={() => setEditingProjectId(editingProjectId === p.id ? null : p.id)}
+                  onSaved={() => { setEditingProjectId(null); refresh(); }}
+                  onError={(msg) => setActionError(msg)}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       {/* Users */}
       <section>
         <h3 style={{ marginBottom: 12 }}>{t("admin.usersHeading")}</h3>
@@ -293,12 +377,94 @@ function Td({
   );
 }
 
-function fmt(iso: string, locale: "ru" | "en"): string {
+function fmt(iso: string, locale: Locale): string {
   const d = new Date(iso);
   const bcp = localeBcp47(locale);
   const date = d.toLocaleDateString(bcp, { year: "numeric", month: "short", day: "numeric" });
   const time = d.toLocaleTimeString(bcp, { hour: "2-digit", minute: "2-digit" });
   return `${date} · ${time}`;
+}
+
+function ProjectRow({
+  project,
+  editing,
+  onToggleEdit,
+  onSaved,
+  onError,
+}: {
+  project: Project;
+  editing: boolean;
+  onToggleEdit: () => void;
+  onSaved: () => void;
+  onError: (msg: string) => void;
+}) {
+  const { t } = useT();
+  const [name, setName] = useState(project.name);
+  const [repoPath, setRepoPath] = useState(project.repo_path ?? "");
+  const [defaultBranch, setDefaultBranch] = useState(project.default_branch ?? "");
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    setBusy(true);
+    try {
+      await api.updateProject(project.id, {
+        name,
+        repo_path: repoPath || null,
+        default_branch: defaultBranch || null,
+      });
+      onSaved();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : t("admin.error.updateProject"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <tr style={{ borderTop: "1px solid var(--border-soft)" }}>
+        <Td><strong>{project.name}</strong></Td>
+        <Td className="mono muted">{project.repo_path ?? "—"}</Td>
+        <Td className="mono muted">{project.default_branch ?? "—"}</Td>
+        <Td align="right">
+          <button className="btn btn-ghost btn-sm" onClick={onToggleEdit}>
+            {editing ? t("common.close") : t("common.edit")}
+          </button>
+        </Td>
+      </tr>
+      {editing && (
+        <tr>
+          <td colSpan={4} style={{ background: "var(--elevated)", padding: 14 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <input
+                className="input"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                style={{ width: 180 }}
+              />
+              <input
+                className="input mono"
+                value={repoPath}
+                onChange={(e) => setRepoPath(e.target.value)}
+                placeholder={t("admin.projectRepoPlaceholder")}
+                style={{ width: 260 }}
+              />
+              <input
+                className="input mono"
+                value={defaultBranch}
+                onChange={(e) => setDefaultBranch(e.target.value)}
+                placeholder={t("admin.projectBranchPlaceholder")}
+                style={{ width: 140 }}
+              />
+              <button className="btn btn-primary btn-sm" onClick={save} disabled={busy || !name.trim()}>
+                {t("common.edit")}
+              </button>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
 }
 
 function UserRowView({

@@ -31,20 +31,35 @@ from mcp.server.transport_security import TransportSecuritySettings
 from agent_kanban.auth import Principal, _resolve_bearer
 from agent_kanban.config import get_settings
 from agent_kanban.db import _engine_for
-from agent_kanban.models import ProgressKind, TaskStatus  # noqa: F401
-from agent_kanban.schemas import ArtifactCreate, ProgressCreate
+from agent_kanban.models import ProgressKind, TaskPriority, TaskStatus  # noqa: F401
+from agent_kanban.schemas import (
+    ArtifactCreate,
+    ProgressCreate,
+    ProjectCreate,
+    TaskCreate,
+    TaskUpdate,
+)
 from agent_kanban.services import (
+    cancel_task as svc_cancel_task,
     claim_task as svc_claim_task,
     complete_task as svc_complete_task,
+    create_project as svc_create_project,
+    create_task as svc_create_task,
     get_next_task as svc_get_next_task,
+    get_task as svc_get_task,
+    list_artifacts_for_task as svc_list_artifacts,
     list_comments as svc_list_comments,
+    list_progress_events as svc_list_progress,
+    list_projects as svc_list_projects,
     list_tasks as svc_list_tasks,
     post_artifact as svc_post_artifact,
     post_comment as svc_post_comment,
     post_progress as svc_post_progress,
+    release_task as svc_release_task,
     request_review as svc_request_review,
     set_task_branch as svc_set_task_branch,
     set_task_pr as svc_set_task_pr,
+    update_task as svc_update_task,
 )
 
 # --- MCP principal resolution -------------------------------------------------
@@ -152,10 +167,13 @@ def _task_to_dict(task) -> dict:
         "title": task.title,
         "description": task.description,
         "status": task.status.value if hasattr(task.status, "value") else task.status,
+        "priority": task.priority.value if hasattr(task.priority, "value") else task.priority,
         "tags": task.tags,
         "claimed_by": task.claimed_by,
         "claimed_at": task.claimed_at.isoformat() + "Z" if task.claimed_at else None,
         "assigned_to": task.assigned_to,
+        "preferred_model": task.preferred_model,
+        "created_by": task.created_by,
         "project_id": task.project_id,
         "sort_order": task.sort_order,
         "repo_path": task.repo_path,
@@ -165,6 +183,38 @@ def _task_to_dict(task) -> dict:
         "pr_status": task.pr_status,
         "created_at": task.created_at.isoformat() + "Z",
         "updated_at": task.updated_at.isoformat() + "Z",
+    }
+
+
+def _progress_to_dict(ev) -> dict:
+    return {
+        "id": ev.id,
+        "task_id": ev.task_id,
+        "agent": ev.agent,
+        "kind": ev.kind.value if hasattr(ev.kind, "value") else ev.kind,
+        "payload": ev.payload,
+        "created_at": ev.created_at.isoformat() + "Z",
+    }
+
+
+def _artifact_to_dict(art) -> dict:
+    return {
+        "id": art.id,
+        "task_id": art.task_id,
+        "path": art.path,
+        "kind": art.kind,
+        "description": art.description,
+        "created_at": art.created_at.isoformat() + "Z",
+    }
+
+
+def _project_to_dict(project) -> dict:
+    return {
+        "id": project.id,
+        "name": project.name,
+        "repo_path": project.repo_path,
+        "default_branch": project.default_branch,
+        "created_at": project.created_at.isoformat() + "Z",
     }
 
 
@@ -204,7 +254,12 @@ def create_mcp() -> FastMCP:
         tags_all: Optional[list[str]] = None,
         exclude_tags: Optional[list[str]] = None,
     ) -> Optional[dict]:
-        """Return the next ready task (oldest first). Returns null if none.
+        """Return the next ready task. Returns null if none.
+
+        Ordering: tasks whose preferred_model matches the calling agent come
+        first, then neutral tasks, then tasks preferring another agent.
+        Within each group by priority (critical first), then sort_order, then
+        oldest. Preference reorders, it never hides a task.
 
         Filters:
           tags_any: task must have at least one of these tags
@@ -242,9 +297,11 @@ def create_mcp() -> FastMCP:
 
     @mcp.tool()
     async def list_tasks(
-        status: Optional[str] = None, tags_any: Optional[list[str]] = None
+        status: Optional[str] = None,
+        tags_any: Optional[list[str]] = None,
+        project_id: Optional[int] = None,
     ) -> list[dict]:
-        """List tasks, optionally filtered by status and/or tags. Does not claim.
+        """List tasks, optionally filtered by status, tags and/or project. Does not claim.
 
         Only tasks that are unassigned OR assigned to the calling agent are
         returned — tasks reserved for other agents are hidden.
@@ -252,8 +309,160 @@ def create_mcp() -> FastMCP:
         principal = await _require_any_principal()
         status_enum = TaskStatus(status) if status else None
         async with session() as s:
-            tasks = await svc_list_tasks(s, status_enum, tags_any, agent=principal.agent_name)
+            tasks = await svc_list_tasks(
+                s, status_enum, tags_any, agent=principal.agent_name, project_id=project_id
+            )
             return [_task_to_dict(t) for t in tasks]
+
+    @mcp.tool()
+    async def get_task(task_id: int) -> Optional[dict]:
+        """Fetch a single task by id. Returns null if not found."""
+        await _require_any_principal()
+        async with session() as s:
+            try:
+                task = await svc_get_task(s, task_id)
+            except ValueError:
+                return None
+            return _task_to_dict(task)
+
+    @mcp.tool()
+    async def create_task(
+        agent: str,
+        title: str,
+        description: str = "",
+        tags: Optional[list[str]] = None,
+        project_id: Optional[int] = None,
+        priority: str = "medium",
+        preferred_model: Optional[str] = None,
+        repo_path: Optional[str] = None,
+        base_branch: Optional[str] = None,
+    ) -> dict:
+        """Create a task. Any authenticated agent may file one (e.g. a bug found
+        while working). The task is recorded with created_by = the calling agent
+        and starts in status "todo"; a human moves it to ready to release it.
+
+        priority: "critical" | "high" | "medium" | "low" (default "medium")
+        preferred_model: soft hint, e.g. the agent that should ideally take it.
+        """
+        await _require_matching_agent(agent)
+        async with session() as s:
+            task = await svc_create_task(
+                s,
+                TaskCreate(
+                    title=title,
+                    description=description,
+                    tags=tags or [],
+                    project_id=project_id,
+                    priority=TaskPriority(priority),
+                    preferred_model=preferred_model,
+                    repo_path=repo_path,
+                    base_branch=base_branch,
+                    created_by=agent,
+                ),
+            )
+            return _task_to_dict(task)
+
+    @mcp.tool()
+    async def update_task(
+        task_id: int,
+        agent: str,
+        title: Optional[str] = None,
+        description: Optional[str] = None,
+        tags: Optional[list[str]] = None,
+        priority: Optional[str] = None,
+        preferred_model: Optional[str] = None,
+        project_id: Optional[int] = None,
+    ) -> dict:
+        """Edit a task you have claimed. Only the claiming agent may update.
+
+        Fields left out are left unchanged. preferred_model and priority drive
+        get_next_task ordering (see get_next_task).
+        """
+        await _require_matching_agent(agent)
+        changes = {
+            k: v
+            for k, v in {
+                "title": title,
+                "description": description,
+                "tags": tags,
+                "priority": TaskPriority(priority) if priority else None,
+                "preferred_model": preferred_model,
+                "project_id": project_id,
+            }.items()
+            if v is not None
+        }
+        async with session() as s:
+            task = await svc_get_task(s, task_id)
+            if task.claimed_by != agent:
+                raise PermissionError(
+                    f"task {task_id} is claimed by {task.claimed_by!r}, not {agent!r}"
+                )
+            task = await svc_update_task(s, task_id, TaskUpdate(**changes))
+            return _task_to_dict(task)
+
+    @mcp.tool()
+    async def release_task(task_id: int, agent: str) -> dict:
+        """Give a claimed task back to the ready pool without completing it.
+
+        Status returns to ready and the claim is cleared, so any agent
+        (including you) can claim it again. Requires task.claimed_by == agent.
+        """
+        await _require_matching_agent(agent)
+        async with session() as s:
+            task = await svc_release_task(s, task_id, agent)
+            return _task_to_dict(task)
+
+    @mcp.tool()
+    async def cancel_task(task_id: int, agent: str) -> dict:
+        """Cancel a claimed task. Requires task.claimed_by == agent."""
+        await _require_matching_agent(agent)
+        async with session() as s:
+            task = await svc_cancel_task(s, task_id, agent)
+            return _task_to_dict(task)
+
+    @mcp.tool()
+    async def list_projects() -> list[dict]:
+        """List all projects."""
+        await _require_any_principal()
+        async with session() as s:
+            projects = await svc_list_projects(s)
+            return [_project_to_dict(p) for p in projects]
+
+    @mcp.tool()
+    async def create_project(
+        agent: str,
+        name: str,
+        repo_path: Optional[str] = None,
+        default_branch: Optional[str] = None,
+    ) -> dict:
+        """Create a project (a grouping for tasks, optionally tied to a repo)."""
+        await _require_matching_agent(agent)
+        async with session() as s:
+            project = await svc_create_project(
+                s, ProjectCreate(name=name, repo_path=repo_path, default_branch=default_branch)
+            )
+            return _project_to_dict(project)
+
+    @mcp.tool()
+    async def list_progress(
+        task_id: int, since_id: Optional[int] = None
+    ) -> list[dict]:
+        """List progress events for a task, oldest first.
+
+        since_id: only events with id > since_id (pagination for polling agents).
+        """
+        await _require_any_principal()
+        async with session() as s:
+            events = await svc_list_progress(s, task_id, since_id)
+            return [_progress_to_dict(e) for e in events]
+
+    @mcp.tool()
+    async def list_artifacts(task_id: int) -> list[dict]:
+        """List registered artifact files for a task."""
+        await _require_any_principal()
+        async with session() as s:
+            artifacts = await svc_list_artifacts(s, task_id)
+            return [_artifact_to_dict(a) for a in artifacts]
 
     @mcp.tool()
     async def post_progress(

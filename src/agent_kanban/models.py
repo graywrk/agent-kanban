@@ -17,6 +17,13 @@ class TaskStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+class TaskPriority(str, Enum):
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
 class ProgressKind(str, Enum):
     TEXT = "text"
     DIFF = "diff"
@@ -57,6 +64,25 @@ class Task(SQLModel, table=True):
     # that agent. Other agents don't see it. Set/cleared via REST PATCH by a
     # human operator — agents themselves cannot assign.
     assigned_to: Optional[str] = Field(default=None, index=True)
+    # Soft preference: which agent should ideally take this task. Unlike
+    # assigned_to it never hides the task — get_next_task only reorders, so a
+    # matching agent sees the task first while every other agent can still
+    # claim it.
+    preferred_model: Optional[str] = None
+    # Importance rank driving get_next_task ordering (critical first).
+    priority: TaskPriority = Field(
+        default=TaskPriority.MEDIUM,
+        sa_column=Column(
+            SAEnum(
+                TaskPriority,
+                name="taskpriority",
+                values_callable=lambda e: [m.value for m in e],
+            ),
+        ),
+    )
+    # Who filed the task ("user" for the web UI, the agent_name for MCP
+    # create_task). Informational only — no authorization hangs off it.
+    created_by: Optional[str] = None
     sort_order: float = Field(default=0.0)
     # Phase 3 fields (present now so migrations are stable; unused in Phase 1)
     repo_path: Optional[str] = None

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useT } from "../i18n.tsx";
+import { PRIORITY_ORDER, PRIORITY_META } from "../priorityMeta";
+import type { Project, TaskPriority } from "../types";
 
 export function NewTaskModal({
   onClose,
@@ -16,7 +18,11 @@ export function NewTaskModal({
   const [repoPath, setRepoPath] = useState("");
   const [baseBranch, setBaseBranch] = useState("");
   const [assignedTo, setAssignedTo] = useState<string>("");
+  const [preferredModel, setPreferredModel] = useState<string>("");
+  const [projectId, setProjectId] = useState<string>("");
+  const [priority, setPriority] = useState<TaskPriority>("medium");
   const [agents, setAgents] = useState<string[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -25,6 +31,10 @@ export function NewTaskModal({
       .listTokens()
       .then((tokens) => setAgents([...new Set(tokens.map((tk) => tk.agent_name))].sort()))
       .catch(() => setAgents([]));
+    api
+      .listProjects()
+      .then(setProjects)
+      .catch(() => setProjects([]));
   }, []);
 
   async function submit() {
@@ -38,6 +48,9 @@ export function NewTaskModal({
         ...(repoPath ? { repo_path: repoPath } : {}),
         ...(baseBranch ? { base_branch: baseBranch } : {}),
         ...(assignedTo ? { assigned_to: assignedTo } : {}),
+        ...(projectId ? { project_id: Number(projectId) } : {}),
+        priority,
+        ...(preferredModel ? { preferred_model: preferredModel } : { preferred_model: null }),
       });
       onCreated(tk);
       onClose();
@@ -66,7 +79,7 @@ export function NewTaskModal({
       <div
         className="card"
         onClick={(e) => e.stopPropagation()}
-        style={{ width: "100%", maxWidth: 480, boxShadow: "var(--shadow-lg)" }}
+        style={{ width: "100%", maxWidth: 480, boxShadow: "var(--shadow-lg)", maxHeight: "90vh", overflowY: "auto" }}
       >
         <div className="eyebrow" style={{ marginBottom: 4 }}>{t("newTask.eyebrow")}</div>
         <h3 style={{ marginBottom: 16 }}>{t("newTask.title")}</h3>
@@ -99,6 +112,51 @@ export function NewTaskModal({
             value={tags}
             onChange={(e) => setTags(e.target.value)}
           />
+        </Field>
+
+        <Field label={t("newTask.projectLabel")}>
+          <select
+            className="input"
+            value={projectId}
+            onChange={(e) => setProjectId(e.target.value)}
+          >
+            <option value="">{t("newTask.projectNone")}</option>
+            {projects.map((p) => (
+              <option key={p.id} value={String(p.id)}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <Field label={t("newTask.priorityLabel")}>
+          <select
+            className="input"
+            value={priority}
+            onChange={(e) => setPriority(e.target.value as TaskPriority)}
+          >
+            {PRIORITY_ORDER.map((p) => (
+              <option key={p} value={p}>
+                {t(PRIORITY_META[p].labelKey)}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <Field label={t("newTask.preferredLabel")}>
+          <select
+            className="input mono"
+            value={preferredModel}
+            onChange={(e) => setPreferredModel(e.target.value)}
+            title={t("newTask.preferredTooltip")}
+          >
+            <option value="">{t("newTask.preferredNone")}</option>
+            {agents.map((a) => (
+              <option key={a} value={a}>
+                {a}
+              </option>
+            ))}
+          </select>
         </Field>
 
         <Field label={t("newTask.repoLabel")}>

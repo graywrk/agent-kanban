@@ -1,4 +1,4 @@
-import type { Comment, ProgressEvent, Task, TaskStatus } from "./types";
+import type { Comment, ProgressEvent, Project, Task, TaskStatus } from "./types";
 
 const BASE = "/api";
 
@@ -27,6 +27,9 @@ export const api = {
     repo_path?: string;
     base_branch?: string;
     assigned_to?: string | null;
+    project_id?: number | null;
+    priority?: string;
+    preferred_model?: string | null;
   }): Promise<Task> {
     return j(
       await fetch(`${BASE}/tasks`, {
@@ -39,12 +42,56 @@ export const api = {
   },
   async updateTask(
     id: number,
-    patch: Partial<Pick<Task, "title" | "description" | "tags" | "status" | "sort_order">> & {
+    patch: Partial<
+      Pick<
+        Task,
+        | "title"
+        | "description"
+        | "tags"
+        | "status"
+        | "sort_order"
+        | "priority"
+        | "preferred_model"
+        | "project_id"
+      >
+    > & {
       assigned_to?: string | null;
     }
   ): Promise<Task> {
     return j(
       await fetch(`${BASE}/tasks/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(patch),
+      })
+    );
+  },
+
+  // ---- Projects ----
+  async listProjects(): Promise<Project[]> {
+    return j(await fetch(`${BASE}/projects`, { credentials: "include" }));
+  },
+  async createProject(data: {
+    name: string;
+    repo_path?: string;
+    default_branch?: string;
+  }): Promise<Project> {
+    return j(
+      await fetch(`${BASE}/projects`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(data),
+      })
+    );
+  },
+  async updateProject(
+    id: number,
+    patch: { name?: string; repo_path?: string | null; default_branch?: string | null }
+  ): Promise<Project> {
+    return j(
+      await fetch(`${BASE}/projects/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",

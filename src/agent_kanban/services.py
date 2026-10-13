@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Optional
 
-from sqlalchemy import update
+from sqlalchemy import case, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
@@ -17,13 +17,17 @@ from agent_kanban.models import (
     Artifact,
     Comment,
     ProgressEvent,
+    Project,
     Task,
+    TaskPriority,
     TaskStatus,
 )
 from agent_kanban.schemas import (
     ArtifactCreate,
     ClaimResult,
     ProgressCreate,
+    ProjectCreate,
+    ProjectUpdate,
     TaskCreate,
     TaskRead,
     TaskUpdate,
@@ -98,18 +102,48 @@ def _assigned_to_or_open(agent: Optional[str]):
     return (Task.assigned_to.is_(None)) | (Task.assigned_to == agent)
 
 
+def _priority_rank() -> "case":
+    """SQL ordering expression: critical first, then high, medium, low."""
+    return case(
+        (Task.priority == TaskPriority.CRITICAL, 0),
+        (Task.priority == TaskPriority.HIGH, 1),
+        (Task.priority == TaskPriority.MEDIUM, 2),
+        else_=3,
+    )
+
+
+def _preference_rank(agent: Optional[str]) -> Optional["case"]:
+    """SQL ordering expression for the soft preferred_model hint.
+
+    Tasks preferring the given agent come first, then neutral tasks (no
+    preference), then tasks preferring someone else. Returns None when there
+    is no agent context, in which case preference plays no role.
+    """
+    if agent is None:
+        return None
+    return case(
+        (Task.preferred_model == agent, 0),
+        (Task.preferred_model.is_(None), 1),
+        else_=2,
+    )
+
+
 async def list_tasks(
     session: AsyncSession,
     status: Optional[TaskStatus] = None,
     tags_any: Optional[list[str]] = None,
     agent: Optional[str] = None,
+    project_id: Optional[int] = None,
 ) -> list[Task]:
     """List tasks. When ``agent`` is given (MCP path), only tasks that are
     unassigned OR assigned to that agent are returned — hard-assignment hiding.
-    The UI path (agent=None) sees everything."""
+    The UI path (agent=None) sees everything. ``project_id`` narrows to one
+    project when given."""
     stmt = select(Task).order_by(Task.sort_order, Task.created_at)
     if status is not None:
         stmt = stmt.where(Task.status == status)
+    if project_id is not None:
+        stmt = stmt.where(Task.project_id == project_id)
     assigned_filter = _assigned_to_or_open(agent)
     if assigned_filter is not None:
         stmt = stmt.where(assigned_filter)
@@ -134,17 +168,21 @@ async def get_next_task(
     exclude_tags: Optional[list[str]],
     agent: Optional[str] = None,
 ) -> Optional[Task]:
-    """Return the next READY task (oldest first). When ``agent`` is given (MCP
-    path), only tasks unassigned OR assigned to that agent are eligible — other
-    agents' reserved tasks are invisible here."""
-    stmt = (
-        select(Task)
-        .where(Task.status == TaskStatus.READY)
-        .order_by(Task.sort_order, Task.created_at)
-    )
+    """Return the next READY task. Ordering: tasks preferring this agent
+    first, then neutral tasks, then tasks preferring another agent; within
+    each group by priority (critical first), then sort_order, then oldest.
+    When ``agent`` is given (MCP path), only tasks unassigned OR assigned to
+    that agent are eligible — other agents' reserved tasks are invisible."""
+    stmt = select(Task).where(Task.status == TaskStatus.READY)
     assigned_filter = _assigned_to_or_open(agent)
     if assigned_filter is not None:
         stmt = stmt.where(assigned_filter)
+    order_by = []
+    pref_rank = _preference_rank(agent)
+    if pref_rank is not None:
+        order_by.append(pref_rank)
+    order_by.extend([_priority_rank(), Task.sort_order, Task.created_at])
+    stmt = stmt.order_by(*order_by)
     result = await session.execute(stmt)
     for task in result.scalars():
         if tags_any and not any(t in task.tags for t in tags_any):
@@ -198,6 +236,33 @@ async def claim_task(session: AsyncSession, task_id: int, agent: str) -> ClaimRe
     assert task is not None
     await _publish_task_event("board", "task_claimed", task)
     return ClaimResult(ok=True, task=_to_task_read(task))
+
+
+async def release_task(session: AsyncSession, task_id: int, agent: str) -> Task:
+    """Give a claimed task back to the ready pool. The claiming agent unclaims:
+    status to ready, claim fields cleared. Other agents can then claim it."""
+    task = await get_task(session, task_id)
+    _check_claimer(task, agent)
+    task.status = TaskStatus.READY
+    task.claimed_by = None
+    task.claimed_at = None
+    task.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    await session.commit()
+    await session.refresh(task)
+    await _publish_task_event("board", "task_released", task)
+    return task
+
+
+async def cancel_task(session: AsyncSession, task_id: int, agent: str) -> Task:
+    """Cancel a claimed task (the MCP mirror of the UI cancel button)."""
+    task = await get_task(session, task_id)
+    _check_claimer(task, agent)
+    task.status = TaskStatus.CANCELLED
+    task.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    await session.commit()
+    await session.refresh(task)
+    await _publish_task_event("board", "task_cancelled", task)
+    return task
 
 
 # ---- Progress ----
@@ -488,3 +553,55 @@ async def post_artifact(
     await session.commit()
     await session.refresh(art)
     return art
+
+
+# ---- Projects ----
+async def list_projects(session: AsyncSession) -> list[Project]:
+    result = await session.execute(select(Project).order_by(Project.created_at))
+    return list(result.scalars())
+
+
+async def create_project(session: AsyncSession, data: ProjectCreate) -> Project:
+    project = Project(**data.model_dump())
+    session.add(project)
+    await session.commit()
+    await session.refresh(project)
+    return project
+
+
+async def update_project(
+    session: AsyncSession, project_id: int, data: ProjectUpdate
+) -> Project:
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise ValueError(f"project {project_id} not found")
+    changes = data.model_dump(exclude_unset=True)
+    for k, v in changes.items():
+        setattr(project, k, v)
+    await session.commit()
+    await session.refresh(project)
+    return project
+
+
+# ---- Progress / Artifact reads (shared by REST and MCP) ----
+async def list_progress_events(
+    session: AsyncSession, task_id: int, since_id: Optional[int] = None
+) -> list[ProgressEvent]:
+    stmt = (
+        select(ProgressEvent)
+        .where(ProgressEvent.task_id == task_id)
+        .order_by(ProgressEvent.created_at, ProgressEvent.id)
+    )
+    if since_id is not None:
+        stmt = stmt.where(ProgressEvent.id > since_id)
+    result = await session.execute(stmt)
+    return list(result.scalars())
+
+
+async def list_artifacts_for_task(
+    session: AsyncSession, task_id: int
+) -> list[Artifact]:
+    result = await session.execute(
+        select(Artifact).where(Artifact.task_id == task_id).order_by(Artifact.id)
+    )
+    return list(result.scalars())
